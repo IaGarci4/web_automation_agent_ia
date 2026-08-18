@@ -1,0 +1,59 @@
+{
+  "_doc": "Disponibilidad País × Tipo de envío DESCUBIERTA en vivo desde el DOM de Hermes2 (clase 'disabled-tab'). Crece con cada corrida.",
+  "por_pais": {
+    "MEXICO": {
+      "tipos": {
+        "cash": true,
+        "deposit": true,
+        "home": false,
+        "mobile": true,
+        "atm": true
+      },
+      "pagadores": {
+        "BANORTE": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
+        },
+        "ELEKTRA": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
+        },
+        "BANCOMER": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
+        },
+        "AURRERA": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
+        },
+        "WALMART": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
+        },
+        "FARMACIAS DEL AHORRO": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
+        }
+      }
+    }
+  },
+  "updated": "2026-08-14 12:00:11"
+}

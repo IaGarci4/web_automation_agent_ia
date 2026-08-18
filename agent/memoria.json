@@ -1,0 +1,72 @@
+{
+  "manda transfer envio banorte": {
+    "test": "test_envio_normal_banorte",
+    "exitos": 1,
+    "ultima_vez": "2026-07-09 21:19"
+  },
+  "manda transfer envio banorte ingles cancela": {
+    "test": "test_envio_normal_banorte",
+    "exitos": 6,
+    "ultima_vez": "2026-07-10 14:29"
+  },
+  "manda transfer envio soriana cancela": {
+    "test": "test_envio_normal_soriana",
+    "exitos": 1,
+    "ultima_vez": "2026-07-10 12:32"
+  },
+  "has envios transfer uno cada pagador cancela": {
+    "test": "test_envio_normal (10 pagadores de mexico — TODOS los activos)",
+    "exitos": 1,
+    "ultima_vez": "2026-07-10 14:44"
+  },
+  "etiqueta deposito deposit banorte": {
+    "test": "etiqueta (deposito and deposit and banorte)",
+    "exitos": 2,
+    "ultima_vez": "2026-07-14 12:22"
+  },
+  "etiqueta kra 1125 negativo": {
+    "test": "etiqueta ((KRA_1125) and (negativo or rechazado or sin))",
+    "exitos": 1,
+    "ultima_vez": "2026-07-14 20:09"
+  },
+  "kra 1125 casos positivos": {
+    "test": "etiqueta ((KRA_1125) and (positivo or valido))",
+    "exitos": 2,
+    "ultima_vez": "2026-07-15 10:37"
+  },
+  "kra 1125 casos negativos solo pagadores nequi bancolombia": {
+    "test": "etiqueta (((KRA_1125) and (negativo or rechazado or sin)) and (UNITELLER or NEQUI2 or BANCOLOMBIA_DIRECTO))",
+    "exitos": 2,
+    "ultima_vez": "2026-07-15 15:05"
+  },
+  "envio transfer banorte cancela": {
+    "test": "test_envio_normal_banorte",
+    "exitos": 1,
+    "ultima_vez": "2026-07-15 15:19"
+  },
+  "envio transfer banorte": {
+    "test": "test_envio_normal_banorte",
+    "exitos": 2,
+    "ultima_vez": "2026-07-15 17:42"
+  },
+  "has envio transfer banorte amount 100 usd cancelas transaccion transactions": {
+    "test": "test_envio_normal_banorte",
+    "exitos": 2,
+    "ultima_vez": "2026-07-30 16:14"
+  },
+  "agent balance": {
+    "test": "test_hm_agentbalance",
+    "exitos": 3,
+    "ultima_vez": "2026-08-14 11:53"
+  },
+  "has envio transfer elektra 120 usd cancela": {
+    "test": "test_envio_normal_elektra",
+    "exitos": 1,
+    "ultima_vez": "2026-07-30 17:35"
+  },
+  "has envio transfer banorte cancela": {
+    "test": "test_envio_normal_banorte",
+    "exitos": 1,
+    "ultima_vez": "2026-08-04 10:29"
+  }
+}

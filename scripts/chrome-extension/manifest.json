@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "HERMES2 Action Recorder",
+  "version": "1.0.0",
+  "description": "Graba acciones del usuario en HERMES2 para generación automática de tests Playwright",
+
+  "permissions": [
+    "scripting",
+    "storage",
+    "tabs",
+    "downloads",
+    "webNavigation"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "HERMES2 Recorder",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["recorder-core.js"],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+
+  "minimum_chrome_version": "111"
+}

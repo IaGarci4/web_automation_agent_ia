@@ -1,0 +1,241 @@
+{
+  "_doc": "Catálogo data-driven de pagadores de COLOMBIA. Mismo esquema que México. El flujo es país-genérico (cambia país del beneficiario + pagadores + reglas).",
+  "_pais": "COLOMBIA",
+  "_campos": {
+    "country": "País destino tal como aparece en el typeahead de país del beneficiario ('COLOMBIA').",
+    "search / row": "Texto para buscar/clicar el pagador en el modal. Usar el nombre EXACTO tal como aparece en Hermes.",
+    "payer_city": "Ciudad del pagador (campo money-info-city del sub-formulario depósito).",
+    "fee_type": "Tarifa (fee-type) a seleccionar en el sub-formulario. Para Colombia depósito: 'COLOMBIA $4'.",
+    "id_payment_type": "2 = Depósito.",
+    "phone_prefix": "Prefijo LOCAL del teléfono del beneficiario. El campo UI espera formato local (3XXXXXXXXX); el selector +57 es separado. La VR KRA-1125 valida el valor completo (57+local), exigiendo que empiece con '573'. Por eso el prefijo local es '3'.",
+    "account_number_len": "Rango de dígitos del número de cuenta; el llenado es ADAPTATIVO (lee el error del DOM y se corrige)."
+  },
+  "payers": [
+    {
+      "code": "UNITELLER",
+      "activo": true,
+      "country": "COLOMBIA",
+      "search": "Bancolombia 2",
+      "row": "",
+      "needs_branch": false,
+      "branch": "",
+      "payer_city": "BOGOTA",
+      "fee_type": "COLOMBIA $4",
+      "id_payment_type": 2,
+      "id_country_currency": null,
+      "is_enabled_scale_rounding": false,
+      "id_scale_rounding": null,
+      "phone_prefix": "3",
+      "_nota": "Gateway 22 (Uniteller). VR KRA-1125: campo UI recibe 3XXXXXXXXX; +57 es selector aparte → backend ve 573XXXXXXXXX ✓"
+    },
+    {
+      "code": "DAVIVIENDA",
+      "activo": true,
+      "country": "COLOMBIA",
+      "search": "Banco Davivienda Sa",
+      "row": "",
+      "needs_branch": false,
+      "branch": "",
+      "payer_city": "BOGOTA",
+      "fee_type": "COLOMBIA $4",
+      "id_payment_type": 2,
+      "id_country_currency": null,
+      "is_enabled_scale_rounding": false,
+      "id_scale_rounding": null,
+      "phone_prefix": "3",
+      "_nota": "Gateway 22 (Uniteller). VR KRA-1125: campo UI recibe 3XXXXXXXXX; +57 es selector aparte → backend ve 573XXXXXXXXX ✓"
+    },
+    {
+      "code": "BANCO_BOGOTA",
+      "activo": true,
+      "country": "COLOMBIA",
+      "search": "Banco De Bogotá",
+      "row": "",
+      "needs_branch": false,
+      "branch": "",
+      "payer_city": "BOGOTA",
+      "fee_type": "COLOMBIA $4",
+      "id_payment_type": 2,
+      "id_country_currency": null,
+      "is_enabled_scale_rounding": false,
+      "id_scale_rounding": null,
+      "phone_prefix": "3",
+      "_nota": "Gateway 22 (Uniteller). VR KRA-1125: campo UI recibe 3XXXXXXXXX; +57 es selector aparte → backend ve 573XXXXXXXXX ✓"
+    },
+    {
+      "code": "NEQUI2",
+      "activo": true,
+      "country": "COLOMBIA",
+      "search": "Nequi",
+      "row": "",
+      "needs_branch": false,
+      "branch": "",
+      "payer_city": "BOGOTA",
+      "fee_type": "COLOMBIA $4",
+      "id_payment_type": 2,
+      "id_country_currency": null,
+      "is_enabled_scale_rounding": false,
+      "id_scale_rounding": null,
+      "phone_prefix": "3",
+      "_nota": "Gateway 22 (Uniteller). VR KRA-1125: campo UI recibe 3XXXXXXXXX; +57 es selector aparte → backend ve 573XXXXXXXXX ✓"
+    },
+    {
+      "code": "DAVIPLATA2",
+      "activo": true,
+      "country": "COLOMBIA",
+      "search": "Daviplata",
+      "row": "",
+      "needs_branch": false,
+      "branch": "",
+      "payer_city": "BOGOTA",
+      "fee_type": "COLOMBIA $4",
+      "id_payment_type": 2,
+      "id_country_currency": null,
+      "is_enabled_scale_rounding": false,
+      "id_scale_rounding": null,
+      "phone_prefix": "3",
+      "_nota": "Gateway 22 (Uniteller). VR KRA-1125: campo UI recibe 3XXXXXXXXX; +57 es selector aparte → backend ve 573XXXXXXXXX ✓"
+    },
+    {
+      "code": "BANCOLOMBIA_DIRECTO",
+      "activo": true,
+      "country": "COLOMBIA",
+      "search": "Bancolombia.",
+      "row": "",
+      "needs_branch": false,
+      "branch": "",
+      "payer_city": "BOGOTA",
+      "fee_type": "COLOMBIA $4",
+      "id_payment_type": 2,
+      "id_country_currency": null,
+      "is_enabled_scale_rounding": false,
+      "id_scale_rounding": null,
+      "phone_prefix": "3",
+      "_nota": "Gateway 4 (directo). VR KRA-1125: campo UI recibe 3XXXXXXXXX; +57 es selector aparte → backend ve 573XXXXXXXXX ✓"
+    }
+  ],
+  "ciudades_estado_por_pais": {
+    "COLOMBIA": [
+      [
+        "BOGOTA",
+        "BOGOTA"
+      ],
+      [
+        "MEDELLIN",
+        "ANTIOQUIA"
+      ],
+      [
+        "CALI",
+        "VALLE DEL CAUCA"
+      ],
+      [
+        "BARRANQUILLA",
+        "ATLANTICO"
+      ],
+      [
+        "CARTAGENA",
+        "BOLIVAR"
+      ],
+      [
+        "CUCUTA",
+        "NORTE DE SANTANDER"
+      ],
+      [
+        "BUCARAMANGA",
+        "SANTANDER"
+      ],
+      [
+        "PEREIRA",
+        "RISARALDA"
+      ],
+      [
+        "SANTA MARTA",
+        "MAGDALENA"
+      ],
+      [
+        "IBAGUE",
+        "TOLIMA"
+      ],
+      [
+        "MANIZALES",
+        "CALDAS"
+      ],
+      [
+        "VILLAVICENCIO",
+        "META"
+      ],
+      [
+        "PASTO",
+        "NARINO"
+      ],
+      [
+        "MONTERIA",
+        "CORDOBA"
+      ],
+      [
+        "NEIVA",
+        "HUILA"
+      ],
+      [
+        "ARMENIA",
+        "QUINDIO"
+      ],
+      [
+        "SINCELEJO",
+        "SUCRE"
+      ],
+      [
+        "VALLEDUPAR",
+        "CESAR"
+      ],
+      [
+        "POPAYAN",
+        "CAUCA"
+      ],
+      [
+        "TUNJA",
+        "BOYACA"
+      ],
+      [
+        "BELLO",
+        "ANTIOQUIA"
+      ],
+      [
+        "SOLEDAD",
+        "ATLANTICO"
+      ],
+      [
+        "SOACHA",
+        "CUNDINAMARCA"
+      ],
+      [
+        "ITAGUI",
+        "ANTIOQUIA"
+      ],
+      [
+        "ENVIGADO",
+        "ANTIOQUIA"
+      ],
+      [
+        "FLORIDABLANCA",
+        "SANTANDER"
+      ],
+      [
+        "PALMIRA",
+        "VALLE DEL CAUCA"
+      ],
+      [
+        "BUENAVENTURA",
+        "VALLE DEL CAUCA"
+      ],
+      [
+        "BARRANCABERMEJA",
+        "SANTANDER"
+      ],
+      [
+        "TULUA",
+        "VALLE DEL CAUCA"
+      ]
+    ]
+  }
+}

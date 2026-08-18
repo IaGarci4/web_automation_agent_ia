@@ -1,0 +1,24 @@
+# Secretos / config local
+.env
+.env.local
+*.key
+
+# Sesión persistente (cookies/tokens) — NO commitear
+session_state/
+session_cookies/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Pytest / reportes
+.pytest_cache/
+report_*.html
+reports/
+
+# IDE
+.vscode/
+.idea/
+gui/usuarios.json

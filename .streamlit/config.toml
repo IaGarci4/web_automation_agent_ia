@@ -1,0 +1,20 @@
+# Configuración LOCAL de este proyecto (Streamlit la lee desde ./.streamlit/).
+# No modifica la global de tu usuario, así que NO choca con otros proyectos.
+
+[browser]
+# Evita el envío de estadísticas de uso.
+gatherUsageStats = false
+
+[server]
+# headless=true evita el prompt de "Email:" al arrancar `streamlit run`.
+headless = true
+# Puerto propio: si otro proyecto usa el 8501, este no choca.
+port = 8502
+
+[theme]
+# Colores firmes del logo Maxi Send + texto oscuro sólido (nada transparente).
+base = "light"
+primaryColor = "#173B8A"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#eef3ff"
+textColor = "#14213d"

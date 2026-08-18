@@ -1,0 +1,500 @@
+{
+  "flujo": "HM-AgentBalance",
+  "acciones": [
+    {
+      "tipo": "click",
+      "nombre": "reports-navbar-item",
+      "selector": "[data-testid=\"reports-navbar-item\"]",
+      "candidatos": {
+        "testid": "reports-navbar-item",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "dropdown",
+        "placeholder": "",
+        "role": "button",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "Reports",
+      "tag": "a",
+      "html": "<a _ngcontent-ng-c340680954=\"\" role=\"button\" aria-expanded=\"true\" aria-label=\"dropdown\" class=\"nav-link ng-star-inserted show\" data-testid=\"reports-navbar-item\" data-bs-toggle=\"\"><svg-dropdown _ngcontent-ng-c340680954=\"\"><svg fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M7 16C7.39782 16 7.77936 15.842 8.06066 15.5607C8.34196 15.2794 8.5 14.8978 8.5 14.5C8.50488 14.4501 8.50488 14.3999 8.5 14.35L11.29 11",
+      "url": "https://test-hermes.maxilabs.net/transfers",
+      "timestamp": "2026-08-14T17:49:28.945Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "reports-0-navbar-dropdown-item",
+      "selector": "[data-testid=\"reports-0-navbar-dropdown-item\"]",
+      "candidatos": {
+        "testid": "reports-0-navbar-dropdown-item",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "dropdown item",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "Agent Balance",
+      "tag": "a",
+      "html": "<a _ngcontent-ng-c340680954=\"\" aria-label=\"dropdown item\" class=\"dropdown-item\" data-testid=\"reports-0-navbar-dropdown-item\"> Agent Balance </a>",
+      "url": "https://test-hermes.maxilabs.net/transfers",
+      "timestamp": "2026-08-14T17:49:30.535Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "modal-confirmation-deny-button",
+      "selector": "[data-testid=\"modal-confirmation-deny-button\"]",
+      "candidatos": {
+        "testid": "modal-confirmation-deny-button",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "YES, Leave",
+      "tag": "button",
+      "html": "<button _ngcontent-ng-c1365418808=\"\" focuslogger=\"\" type=\"button\" data-bs-dismiss=\"modal\" class=\"btn btn-outline-success btn-single-button d-flex justify-content-center align-items-center pb-2 btn-outline-danger ng-star-inserted\" data-testid=\"modal-confirmation-deny-button\" style=\"width: auto; height: auto;\"> YES, Leave </button>",
+      "url": "https://test-hermes.maxilabs.net/transfers",
+      "timestamp": "2026-08-14T17:49:32.480Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "p-element",
+      "selector": "[data-testid=\"report-type-dropdown-input\"]",
+      "candidatos": {
+        "testid": "",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "combobox",
+        "ancestorTestid": "report-type-dropdown-input",
+        "ancestorTag": "p-dropdown",
+        "ancestorFormcontrol": "typeOfReport"
+      },
+      "texto": "",
+      "tag": "span",
+      "html": "<span role=\"combobox\" pautofocus=\"\" class=\"p-element p-dropdown-label p-inputtext p-dropdown-label-empty ng-star-inserted\" aria-disabled=\"false\" aria-haspopup=\"listbox\" aria-expanded=\"false\" tabindex=\"0\">&nbsp;<!----><!----><!----><!----></span>",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:49:34.787Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "continuous_balance",
+      "selector": "[data-testid=\"report-type-dropdown-input\"]",
+      "candidatos": {
+        "testid": "",
+        "id": "dropdown_0",
+        "idDinamico": true,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "CONTINUOUS BALANCE",
+        "placeholder": "",
+        "role": "option",
+        "ancestorTestid": "report-type-dropdown-input",
+        "ancestorTag": "p-dropdown",
+        "ancestorFormcontrol": "typeOfReport"
+      },
+      "texto": "CONTINUOUS BALANCE",
+      "tag": "li",
+      "html": "<li role=\"option\" pripple=\"\" class=\"p-ripple p-element p-dropdown-item\" id=\"dropdown_0\" aria-label=\"CONTINUOUS BALANCE\" aria-setsize=\"2\" aria-posinset=\"1\" aria-selected=\"false\" data-p-focused=\"false\" data-p-highlight=\"false\" data-p-disabled=\"false\"><!----><span class=\"ng-star-inserted\">CONTINUOUS BALANCE</span><!----><!----></li>",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:49:35.765Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "test-id-button",
+      "selector": "[data-testid=\"test-id-button\"]",
+      "candidatos": {
+        "testid": "test-id-button",
+        "id": "id-button",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "Search",
+      "tag": "button",
+      "html": "<button _ngcontent-ng-c3256991308=\"\" focuslogger=\"\" class=\"button success md w-100\" id=\"id-button\" data-testid=\"test-id-button\" type=\"button\"> Search </button>",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:49:37.603Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "test-id-h3-heading",
+      "selector": "[data-testid=\"test-id-h3-heading\"]",
+      "candidatos": {
+        "testid": "test-id-h3-heading",
+        "id": "typography",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "Agent’s Balance",
+      "tag": "p",
+      "html": "<p _ngcontent-ng-c1496907601=\"\" class=\"h3-heading\" id=\"typography\" data-testid=\"test-id-h3-heading\" style=\"text-align: left; color: rgb(69, 140, 68);\">Agent’s Balance</p>",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:49:42.882Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "report-options-button",
+      "selector": "[data-testid=\"report-options-button\"]",
+      "candidatos": {
+        "testid": "report-options-button",
+        "id": "id-button",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "Options",
+      "tag": "button",
+      "html": "<button _ngcontent-ng-c3256991308=\"\" focuslogger=\"\" class=\"button outline md dropdown-toggle w-100 outline-success\" id=\"id-button\" data-testid=\"report-options-button\" type=\"button\"> Options </button>",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:49:45.607Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "align-items-center",
+      "selector": "li",
+      "candidatos": {
+        "testid": "",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "View",
+      "tag": "li",
+      "html": "<li _ngcontent-ng-c1144738052=\"\" class=\"align-items-center d-flex ng-star-inserted\" tabindex=\"0\"><div _ngcontent-ng-c1144738052=\"\" class=\"wrapper-icon\"><hermes2-frontend-icon _ngcontent-ng-c1144738052=\"\" widthicon=\"20px\" heighticon=\"20px\" _nghost-ng-c3003915296=\"\"><svg _ngcontent-ng-c3003915296=\"\" class=\"d-flex icon justify-content-center\" data-testid=\"report-options-0-icon-svg\" width=\"20px\" height=\"20px\" viewBox=\"0 0 20 20\"><g _ngcontent-ng-c3003915296=\"\"><path _ngcontent-ng-c3003915296=\"\" d=\"M",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:49:47.180Z"
+    },
+    {
+      "tipo": "scroll",
+      "nombre": "scroll",
+      "selector": "div",
+      "scrollX": 0,
+      "scrollY": 628,
+      "tag": "scroll",
+      "html": "",
+      "texto": "",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:50:06.452Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "small-button-icon-component-icon-svg",
+      "selector": "[data-testid=\"small-button-icon-component-icon-svg\"]",
+      "candidatos": {
+        "testid": "small-button-icon-component-icon-svg",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "",
+      "tag": "svg",
+      "html": "<svg _ngcontent-ng-c3003915296=\"\" class=\"d-flex icon justify-content-center\" data-testid=\"small-button-icon-component-icon-svg\" width=\"22\" height=\"22\" viewBox=\"0 0 22 22\"><g _ngcontent-ng-c3003915296=\"\"><path _ngcontent-ng-c3003915296=\"\" d=\"M13.1998 8.93337H10.6398V6.37337C10.6398 6.14705 10.5499 5.93 10.3899 5.76997C10.2298 5.60994 10.0128 5.52004 9.78646 5.52004C9.56014 5.52004 9.34309 5.60994 9.18306 5.76997C9.02303 5.93 8.93312 6.14705 8.93312 6.37337V8.93337H6.37312C6.14681 8.93337 5.92976 ",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:50:09.650Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "small-button-icon-component-icon-svg",
+      "selector": "[data-testid=\"small-button-icon-component-icon-svg\"]",
+      "candidatos": {
+        "testid": "small-button-icon-component-icon-svg",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "",
+      "tag": "svg",
+      "html": "<svg _ngcontent-ng-c3003915296=\"\" class=\"d-flex icon justify-content-center\" data-testid=\"small-button-icon-component-icon-svg\" width=\"22\" height=\"22\" viewBox=\"0 0 22 22\"><g _ngcontent-ng-c3003915296=\"\"><path _ngcontent-ng-c3003915296=\"\" d=\"M13.1998 8.93337H10.6398V6.37337C10.6398 6.14705 10.5499 5.93 10.3899 5.76997C10.2298 5.60994 10.0128 5.52004 9.78646 5.52004C9.56014 5.52004 9.34309 5.60994 9.18306 5.76997C9.02303 5.93 8.93312 6.14705 8.93312 6.37337V8.93337H6.37312C6.14681 8.93337 5.92976 ",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:50:10.418Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "small-button-icon-component-icon-svg",
+      "selector": "[data-testid=\"small-button-icon-component-icon-svg\"]",
+      "candidatos": {
+        "testid": "small-button-icon-component-icon-svg",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "",
+      "tag": "svg",
+      "html": "<svg _ngcontent-ng-c3003915296=\"\" class=\"d-flex icon justify-content-center\" data-testid=\"small-button-icon-component-icon-svg\" width=\"22\" height=\"22\" viewBox=\"0 0 22 22\"><g _ngcontent-ng-c3003915296=\"\"><path _ngcontent-ng-c3003915296=\"\" d=\"M18.9257 17.7142L15.7598 14.5739C16.9887 13.0417 17.5838 11.0968 17.4228 9.13928C17.2618 7.18173 16.3568 5.36028 14.8941 4.04944C13.4314 2.7386 11.522 2.03802 9.55855 2.09174C7.59513 2.14547 5.72691 2.94942 4.33805 4.33829C2.94918 5.72716 2.14523 7.59538 2.09",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:50:11.517Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "small-button-icon-component-icon-svg",
+      "selector": "[data-testid=\"small-button-icon-component-icon-svg\"]",
+      "candidatos": {
+        "testid": "small-button-icon-component-icon-svg",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "",
+      "tag": "svg",
+      "html": "<svg _ngcontent-ng-c3003915296=\"\" class=\"d-flex icon justify-content-center\" data-testid=\"small-button-icon-component-icon-svg\" width=\"22\" height=\"22\" viewBox=\"0 0 22 22\"><g _ngcontent-ng-c3003915296=\"\"><path _ngcontent-ng-c3003915296=\"\" d=\"M18.9257 17.7142L15.7598 14.5739C16.9887 13.0417 17.5838 11.0968 17.4228 9.13928C17.2618 7.18173 16.3568 5.36028 14.8941 4.04944C13.4314 2.7386 11.522 2.03802 9.55855 2.09174C7.59513 2.14547 5.72691 2.94942 4.33805 4.33829C2.94918 5.72716 2.14523 7.59538 2.09",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:50:12.175Z"
+    },
+    {
+      "tipo": "scroll",
+      "nombre": "scroll",
+      "selector": "div",
+      "scrollX": 0,
+      "scrollY": 200,
+      "tag": "scroll",
+      "html": "",
+      "texto": "",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:50:14.152Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "test-id-paragraph-medium-bold",
+      "selector": "[data-testid=\"test-id-paragraph-medium-bold\"]",
+      "candidatos": {
+        "testid": "test-id-paragraph-medium-bold",
+        "id": "typography",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "Go Back",
+      "tag": "p",
+      "html": "<p _ngcontent-ng-c1496907601=\"\" class=\"paragraph-medium-bold\" id=\"typography\" data-testid=\"test-id-paragraph-medium-bold\" style=\"text-align: left; color: rgb(2, 82, 191);\">Go Back</p>",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:50:16.906Z"
+    },
+    {
+      "tipo": "click",
+      "nombre": "dropdown",
+      "selector": "[aria-label=\"dropdown\"]",
+      "candidatos": {
+        "testid": "",
+        "id": "",
+        "idDinamico": false,
+        "name": "",
+        "formcontrolname": "",
+        "ariaLabel": "dropdown",
+        "placeholder": "",
+        "role": "",
+        "ancestorTestid": "",
+        "ancestorTag": "",
+        "ancestorFormcontrol": ""
+      },
+      "texto": "Transfers",
+      "tag": "a",
+      "html": "<a _ngcontent-ng-c340680954=\"\" aria-label=\"dropdown\" class=\"nav-link d-flex gap-1 ng-star-inserted\"><svg-dropdown _ngcontent-ng-c340680954=\"\"><svg fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M10.46 6.00002L11 5.41002V9.00002C11 9.26523 11.1054 9.51959 11.2929 9.70713C11.4804 9.89466 11.7348 10 12 10C12.2652 10 12.5196 9.89466 12.7071 9.70713C12.8946 9.51959 13 9.26523 13 9.00002V5.41002L13.54 5.96002C1",
+      "url": "https://test-hermes.maxilabs.net/reports/AgentBalance",
+      "timestamp": "2026-08-14T17:50:22.591Z"
+    }
+  ],
+  "elementos": {
+    "reports-navbar-item": {
+      "selector": "[data-testid=\"reports-navbar-item\"]",
+      "tag": "a",
+      "html": "<a _ngcontent-ng-c340680954=\"\" role=\"button\" aria-expanded=\"true\" aria-label=\"dropdown\" class=\"nav-link ng-star-inserted show\" data-testid=\"reports-navbar-item\" data-bs-toggle=\"\"><svg-dropdown _ngcontent-ng-c340680954=\"\"><svg fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M7 16C7.39782 16 7.77936 15.842 8.06066 15.5607C8.34196 15.2794 8.5 14.8978 8.5 14.5C8.50488 14.4501 8.50488 14.3999 8.5 14.35L11.29 11",
+      "acciones": [
+        "click"
+      ]
+    },
+    "reports-0-navbar-dropdown-item": {
+      "selector": "[data-testid=\"reports-0-navbar-dropdown-item\"]",
+      "tag": "a",
+      "html": "<a _ngcontent-ng-c340680954=\"\" aria-label=\"dropdown item\" class=\"dropdown-item\" data-testid=\"reports-0-navbar-dropdown-item\"> Agent Balance </a>",
+      "acciones": [
+        "click"
+      ]
+    },
+    "modal-confirmation-deny-button": {
+      "selector": "[data-testid=\"modal-confirmation-deny-button\"]",
+      "tag": "button",
+      "html": "<button _ngcontent-ng-c1365418808=\"\" focuslogger=\"\" type=\"button\" data-bs-dismiss=\"modal\" class=\"btn btn-outline-success btn-single-button d-flex justify-content-center align-items-center pb-2 btn-outline-danger ng-star-inserted\" data-testid=\"modal-confirmation-deny-button\" style=\"width: auto; height: auto;\"> YES, Leave </button>",
+      "acciones": [
+        "click"
+      ]
+    },
+    "p-element": {
+      "selector": "[data-testid=\"report-type-dropdown-input\"]",
+      "tag": "span",
+      "html": "<span role=\"combobox\" pautofocus=\"\" class=\"p-element p-dropdown-label p-inputtext p-dropdown-label-empty ng-star-inserted\" aria-disabled=\"false\" aria-haspopup=\"listbox\" aria-expanded=\"false\" tabindex=\"0\">&nbsp;<!----><!----><!----><!----></span>",
+      "acciones": [
+        "click"
+      ]
+    },
+    "continuous_balance": {
+      "selector": "[data-testid=\"report-type-dropdown-input\"]",
+      "tag": "li",
+      "html": "<li role=\"option\" pripple=\"\" class=\"p-ripple p-element p-dropdown-item\" id=\"dropdown_0\" aria-label=\"CONTINUOUS BALANCE\" aria-setsize=\"2\" aria-posinset=\"1\" aria-selected=\"false\" data-p-focused=\"false\" data-p-highlight=\"false\" data-p-disabled=\"false\"><!----><span class=\"ng-star-inserted\">CONTINUOUS BALANCE</span><!----><!----></li>",
+      "acciones": [
+        "click"
+      ]
+    },
+    "test-id-button": {
+      "selector": "[data-testid=\"test-id-button\"]",
+      "tag": "button",
+      "html": "<button _ngcontent-ng-c3256991308=\"\" focuslogger=\"\" class=\"button success md w-100\" id=\"id-button\" data-testid=\"test-id-button\" type=\"button\"> Search </button>",
+      "acciones": [
+        "click"
+      ]
+    },
+    "test-id-h3-heading": {
+      "selector": "[data-testid=\"test-id-h3-heading\"]",
+      "tag": "p",
+      "html": "<p _ngcontent-ng-c1496907601=\"\" class=\"h3-heading\" id=\"typography\" data-testid=\"test-id-h3-heading\" style=\"text-align: left; color: rgb(69, 140, 68);\">Agent’s Balance</p>",
+      "acciones": [
+        "click"
+      ]
+    },
+    "report-options-button": {
+      "selector": "[data-testid=\"report-options-button\"]",
+      "tag": "button",
+      "html": "<button _ngcontent-ng-c3256991308=\"\" focuslogger=\"\" class=\"button outline md dropdown-toggle w-100 outline-success\" id=\"id-button\" data-testid=\"report-options-button\" type=\"button\"> Options </button>",
+      "acciones": [
+        "click"
+      ]
+    },
+    "align-items-center": {
+      "selector": "li",
+      "tag": "li",
+      "html": "<li _ngcontent-ng-c1144738052=\"\" class=\"align-items-center d-flex ng-star-inserted\" tabindex=\"0\"><div _ngcontent-ng-c1144738052=\"\" class=\"wrapper-icon\"><hermes2-frontend-icon _ngcontent-ng-c1144738052=\"\" widthicon=\"20px\" heighticon=\"20px\" _nghost-ng-c3003915296=\"\"><svg _ngcontent-ng-c3003915296=\"\" class=\"d-flex icon justify-content-center\" data-testid=\"report-options-0-icon-svg\" width=\"20px\" height=\"20px\" viewBox=\"0 0 20 20\"><g _ngcontent-ng-c3003915296=\"\"><path _ngcontent-ng-c3003915296=\"\" d=\"M",
+      "acciones": [
+        "click"
+      ]
+    },
+    "scroll": {
+      "selector": "div",
+      "tag": "scroll",
+      "html": "",
+      "acciones": [
+        "scroll",
+        "scroll"
+      ]
+    },
+    "small-button-icon-component-icon-svg": {
+      "selector": "[data-testid=\"small-button-icon-component-icon-svg\"]",
+      "tag": "svg",
+      "html": "<svg _ngcontent-ng-c3003915296=\"\" class=\"d-flex icon justify-content-center\" data-testid=\"small-button-icon-component-icon-svg\" width=\"22\" height=\"22\" viewBox=\"0 0 22 22\"><g _ngcontent-ng-c3003915296=\"\"><path _ngcontent-ng-c3003915296=\"\" d=\"M13.1998 8.93337H10.6398V6.37337C10.6398 6.14705 10.5499 5.93 10.3899 5.76997C10.2298 5.60994 10.0128 5.52004 9.78646 5.52004C9.56014 5.52004 9.34309 5.60994 9.18306 5.76997C9.02303 5.93 8.93312 6.14705 8.93312 6.37337V8.93337H6.37312C6.14681 8.93337 5.92976 ",
+      "acciones": [
+        "click",
+        "click",
+        "click",
+        "click"
+      ]
+    },
+    "test-id-paragraph-medium-bold": {
+      "selector": "[data-testid=\"test-id-paragraph-medium-bold\"]",
+      "tag": "p",
+      "html": "<p _ngcontent-ng-c1496907601=\"\" class=\"paragraph-medium-bold\" id=\"typography\" data-testid=\"test-id-paragraph-medium-bold\" style=\"text-align: left; color: rgb(2, 82, 191);\">Go Back</p>",
+      "acciones": [
+        "click"
+      ]
+    },
+    "dropdown": {
+      "selector": "[aria-label=\"dropdown\"]",
+      "tag": "a",
+      "html": "<a _ngcontent-ng-c340680954=\"\" aria-label=\"dropdown\" class=\"nav-link d-flex gap-1 ng-star-inserted\"><svg-dropdown _ngcontent-ng-c340680954=\"\"><svg fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M10.46 6.00002L11 5.41002V9.00002C11 9.26523 11.1054 9.51959 11.2929 9.70713C11.4804 9.89466 11.7348 10 12 10C12.2652 10 12.5196 9.89466 12.7071 9.70713C12.8946 9.51959 13 9.26523 13 9.00002V5.41002L13.54 5.96002C1",
+      "acciones": [
+        "click"
+      ]
+    }
+  },
+  "paginas": [
+    {
+      "url": "https://test-hermes.maxilabs.net/transfers",
+      "titulo": "Envío de Dinero | Hermes 2",
+      "evento": "start",
+      "timestamp": "2026-08-14T17:49:13.768Z"
+    }
+  ],
+  "metadata": {
+    "total_acciones": 17,
+    "total_elementos": 13,
+    "total_paginas": 1,
+    "duracion_segundos": 81.4,
+    "timestamp": "2026-08-14T17:50:35.216Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+  }
+}

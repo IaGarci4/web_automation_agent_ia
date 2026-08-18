@@ -1,0 +1,58 @@
+{
+  "_doc": "Catálogo data-driven de pagadores de MÉXICO. UN solo flujo estable (ELEKTRA, vía HmTransferelektraPage) se parametriza con lo que cambia por pagador. Para agregar un pagador NO se graba nada: se llena su entrada y se pone \"activo\": true. El agente elige al azar entre los activos (o usa PAYER_FORZADO=CODE).",
+  "_pais": "MEXICo",
+  "_campos": {
+    "country": "País destino (valor tal como aparece en el typeahead de país del beneficiario). 'MEXICo'.",
+    "search": "Texto a teclear en el buscador de pagadores",
+    "row": "Texto de la fila a clicar en el modal (vacío = primera fila visible)",
+    "needs_branch": "true si el pagador exige elegir sucursal",
+    "branch": "Texto de la sucursal (vacío = primera disponible)",
+    "payer_city": "Ciudad del pagador (campo money-info-city) — ESTÁTICA por pagador",
+    "id_country_currency": "10 = México/Pesos (define la regla de redondeo por corredor)",
+    "is_enabled_scale_rounding / id_scale_rounding": "Escala de redondeo (default 2 decimales si null)"
+  },
+  "payers": [
+    {"code": "ELEKTRA", "activo": true, "country": "MEXICo",
+     "search": "ELEKTRa", "row": "ELEKTRA DIRECTO",
+     "needs_branch": true, "branch": "DAZ JAL SAN JOAQUIN GUAD", "payer_city": "GUADALAJARa",
+     "id_payment_type": 1, "id_country_currency": 10,
+     "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+
+    {"code": "BANCOPPEL", "activo": true, "country": "MEXICo",
+     "search": "BANCOPPEL", "row": "BANCOPPEL",
+     "needs_branch": false, "branch": "", "payer_city": "MONTERREY",
+     "id_payment_type": 1, "id_country_currency": 10,
+     "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+
+    {"code": "SORIANA", "activo": true, "country": "MEXICo",
+     "search": "SORIANA", "row": "SORIANA",
+     "needs_branch": false, "branch": "", "payer_city": "MONTERREY",
+     "id_payment_type": 1, "id_country_currency": 10,
+     "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+
+    {"code": "WALMART", "activo": true, "country": "MEXICo", "search": "WALMART", "row": "WALMART", "needs_branch": false, "branch": "", "payer_city": "VERACRUZ", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "AURRERA", "activo": true, "country": "MEXICo", "search": "AURRERA", "row": "AURRERA", "needs_branch": false, "branch": "", "payer_city": "GUANAJUATO", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "BANCOMER", "activo": true, "country": "MEXICo", "search": "BANCOMER", "row": "BANCOMER", "needs_branch": false, "branch": "", "payer_city": "ESTADO DE MEXICO", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "A WALDOS", "activo": true, "country": "MEXICo", "search": "WALDOS", "row": "A WALDOS", "needs_branch": false, "branch": "", "payer_city": "PUEBLA", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "FARMACIAS DEL AHORRO", "activo": true, "country": "MEXICo", "search": "FARMACIAS DEL AHORRO", "row": "FARMACIAS DEL AHORRO", "needs_branch": false, "branch": "", "payer_city": "TLAXCALA", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "CHEDRAUI EFECTIVO", "activo": true, "country": "MEXICo", "search": "CHEDRAUI", "row": "CHEDRAUI EFECTIVO", "needs_branch": false, "branch": "", "payer_city": "MERIDA", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": true, "id_scale_rounding": 3},
+
+    {"code": "BANORTE",   "activo": true,  "country": "MEXICo", "search": "BANORTE",   "row": "BANORTE", "needs_branch": false, "branch": "", "payer_city": "MERIDA", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+
+    {"code": "BBVA",      "activo": false, "country": "MEXICo", "search": "BBVA",      "row": "", "needs_branch": false, "branch": "", "payer_city": "GUADALAJARa", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "BANAMEX",   "activo": false, "country": "MEXICo", "search": "BANAMEX",   "row": "", "needs_branch": false, "branch": "", "payer_city": "GUADALAJARa", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "SANTANDER", "activo": false, "country": "MEXICo", "search": "SANTANDER", "row": "", "needs_branch": false, "branch": "", "payer_city": "GUADALAJARa", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "HSBC",      "activo": false, "country": "MEXICo", "search": "HSBC",      "row": "", "needs_branch": false, "branch": "", "payer_city": "GUADALAJARa", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "SCOTIABANK","activo": false, "country": "MEXICo", "search": "SCOTIABANK","row": "", "needs_branch": false, "branch": "", "payer_city": "GUADALAJARa", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "AFIRME",    "activo": false, "country": "MEXICo", "search": "AFIRME",    "row": "", "needs_branch": false, "branch": "", "payer_city": "GUADALAJARa", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null},
+    {"code": "BANCO AZTECA", "activo": false, "country": "MEXICo", "search": "AZTECA", "row": "", "needs_branch": false, "branch": "", "payer_city": "GUADALAJARa", "id_payment_type": 1, "id_country_currency": 10, "is_enabled_scale_rounding": false, "id_scale_rounding": null}
+  ],
+  "ciudades_estado_por_pais": {
+    "MEXICo": [
+      ["GUADALAJARA", "JALISCO"], ["MONTERREY", "NUEVO LEON"], ["PUEBLA", "PUEBLA"],
+      ["LEON", "GUANAJUATO"], ["MERIDA", "YUCATAN"], ["QUERETARO", "QUERETARO"],
+      ["TIJUANA", "BAJA CALIFORNIA"], ["TOLUCA", "MEXICO"], ["CULIACAN", "SINALOA"],
+      ["MORELIA", "MICHOACAN"]
+    ]
+  }
+}
