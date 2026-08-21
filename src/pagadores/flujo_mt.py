@@ -15,6 +15,7 @@ Lo usan los tests generados en src/tests/test_envio_normal_<pais>.py.
 """
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -152,15 +153,15 @@ async def set_beneficiary_expandido(flow, expandir: bool) -> None:
             except Exception:
                 pass
             try:
-                await btn.scroll_into_view_if_needed(timeout=1_500)
-                await btn.click(timeout=2_500)
+                await btn.scroll_into_view_if_needed(timeout=1_000)
+                await btn.click(timeout=1_500)
             except Exception:
                 pass
             # Esperar a que el detalle alcance el estado deseado (fin de la
             # animación 'collapse' de Bootstrap), en vez de un sleep ciego +
             # re-chequeo que puede volver a clickear y OSCILAR el estado.
             try:
-                await detalle.wait_for(state=estado, timeout=2_500)
+                await detalle.wait_for(state=estado, timeout=1_500)
                 return
             except Exception:
                 continue
@@ -343,6 +344,24 @@ async def _elegir_fila_sucursal(flow, logger=None) -> bool:
     except Exception:
         pass
     filas = flow.page.locator(sel)
+    # Si el modal aún no pintó filas, REINTENTAR abriéndolo de nuevo: dejarlo sin
+    # sucursal cuando la app la exige deja el formulario INVÁLIDO y Continue no
+    # avanza (se veía como 'Sin mensaje ni resumen' en bucle).
+    try:
+        if await filas.count() == 0:
+            for _ in range(2):
+                try:
+                    await flow.click_branch()
+                except Exception:
+                    pass
+                try:
+                    await flow.page.locator(sel).first.wait_for(state="visible", timeout=6000)
+                except Exception:
+                    pass
+                if await filas.count() > 0:
+                    break
+    except Exception:
+        pass
     visibles = []
     try:
         n = await filas.count()
@@ -443,6 +462,15 @@ _RE_BACK              = re.compile(r"back to transfer|regresar a env", re.I)
 TESTID_PAGO_DEBITO = "transfer-totals-pin-0"
 _POS_ACCEPT_TESTID = "pos-accept-button"
 
+# Datos por defecto para la INFORMACIÓN ADICIONAL cuando el flujo la exige
+# (regla del proyecto: si el campo/ficha se requiere, se llena; si no, se sigue).
+# Configurables por entorno para no tocar código.
+_IA_PAIS    = os.getenv("IA_PAIS",    "MEXICO")
+_IA_TIPO_ID = os.getenv("IA_TIPO_ID", "PASSPORT")
+_IA_NUM_ID  = os.getenv("IA_NUM_ID",  "A1234567")
+_IA_EXP     = os.getenv("IA_EXP",     "12/31/2032")
+_IA_DOB     = os.getenv("IA_DOB",     "05/21/1983")
+
 
 async def seleccionar_pago_tarjeta_debito(flow, logger=None) -> bool:
     """Selecciona la forma de pago 'Tarjeta débito' en el panel de Totales."""
@@ -493,7 +521,7 @@ async def _click_back_to_transfer(flow, logger=None) -> bool:
 
 
 async def completar_envio(flow, completar=True, logger=None, evi=None,
-                          pos_pago=False):
+                          pos_pago=False, tipo_envio="cash"):
     """Termina la transacción: Continue → (resumen) → YES, Send → declina recibo.
 
     Maneja el mensaje INFORMATIVO de compliance/OFAC (beneficiario sancionado):
@@ -506,13 +534,16 @@ async def completar_envio(flow, completar=True, logger=None, evi=None,
         if logger:
             logger.info("Envío NO completado (configurado COMPLETAR_ENVIO=0).")
         return False
+    # Import perezoso (evita ciclo pagadores↔sanity_general al cargar el módulo).
+    from src.sanity_general import info_adicional as _IA
     try:
         send_btn = flow.page.get_by_test_id(SEND_BUTTON_TESTID)
 
         async def _esperar_mensaje_o_resumen(timeout_ms: int) -> str:
             """Tras dar Continue, espera (poll) a que aparezca ALGO: el mensaje
-            informativo de compliance/OFAC O el resumen (botón 'Sí, Enviar').
-            El mensaje OFAC a veces TARDA (ej. doméstico), por eso se sondea."""
+            informativo de compliance/OFAC, la INFO ADICIONAL requerida, o el
+            resumen (botón 'Sí, Enviar'). El mensaje OFAC a veces TARDA (ej.
+            doméstico), por eso se sondea."""
             paso = 1_000
             t = 0
             while t < timeout_ms:
@@ -521,6 +552,14 @@ async def completar_envio(flow, completar=True, logger=None, evi=None,
                 try:
                     if await send_btn.first.is_visible():
                         return "resumen"
+                except Exception:
+                    pass
+                # REGLA DEL PROYECTO: si el flujo PIDE Información Adicional, se
+                # llena; si no la pide, se continúa. Sin esto, Continue no avanza
+                # (el form queda inválido) y el loop reintentaba en vano.
+                try:
+                    if await _IA._requiere_info(flow, timeout=800):
+                        return "info_adicional"
                 except Exception:
                     pass
                 await flow.page.wait_for_timeout(paso)
@@ -546,6 +585,23 @@ async def completar_envio(flow, completar=True, logger=None, evi=None,
                     logger.info("Mensaje de compliance/OFAC (intento %d) → Back to Transfer.",
                                 intento)
                 await _click_back_to_transfer(flow, logger)
+                continue
+            if estado == "info_adicional":
+                # El flujo EXIGE Información Adicional → se llena y se acepta;
+                # luego se reintenta Continue. Si no se pudiera llenar, se sigue
+                # intentando en la próxima vuelta (no se aborta el envío).
+                if logger:
+                    logger.info("Información Adicional REQUERIDA (intento %d) → llenando…",
+                                intento)
+                if evi is not None and intento == 1:
+                    await evi.shot("info_adicional_requerida")
+                try:
+                    await _IA.llenar_si_requerida(
+                        flow, pais=_IA_PAIS, tipo_id=_IA_TIPO_ID, num_id=_IA_NUM_ID,
+                        exp=_IA_EXP, dob=_IA_DOB, tipo=tipo_envio, timeout=3_000)
+                except Exception as e:
+                    if logger:
+                        logger.warning("Info Adicional: no se pudo llenar (%s).", str(e)[:90])
                 continue
             # Nada apareció en la ventana: reintentar Continue en la próxima vuelta.
             if logger:

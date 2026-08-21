@@ -164,7 +164,8 @@ async def _run_envio(logged_page, cfg):
         except Exception as e:
             logger.warning(f"[{cfg['code']}] No se pudo completar la cancelación: {e}")
     elif COMPLETAR:
-        enviado = await F.completar_envio(flow, completar=True, logger=logger)
+        enviado = await F.completar_envio(flow, completar=True, logger=logger,
+                                          tipo_envio=TIPO)
         logger.info(f"[{cfg['code']}] Envío {'completado' if enviado else 'NO completado'}.")
     else:
         logger.info(f"[{cfg['code']}] COMPLETAR_ENVIO=0 — solo se llenó y eligió pagador.")

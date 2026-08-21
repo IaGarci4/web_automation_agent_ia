@@ -94,10 +94,13 @@ def _corto(nodeid: str) -> str:
 
 
 def resumen(texto: str) -> dict:
-    """Conteo global {'passed':n,'failed':n,...} desde la línea de resumen."""
+    """Conteo global {'passed':n,'failed':n,...}. SUMA todas las líneas de
+    resumen: en corridas por tiempo/cantidad hay una por iteración (cada envío es
+    un pytest aparte), así el total refleja TODOS los envíos del lapso, no el
+    último. En una corrida simple hay una sola línea → mismo resultado."""
     out = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
     for m in _SUM_RE.finditer(texto or ""):
-        out[m.group(2)] = int(m.group(1))
+        out[m.group(2)] += int(m.group(1))
     return out
 
 

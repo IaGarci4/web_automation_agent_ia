@@ -12,6 +12,7 @@ Correr:
     streamlit run gui/app.py
 """
 
+import base64
 import json
 import sys
 from pathlib import Path
@@ -29,22 +30,27 @@ from gui import i18n                                  # noqa: E402
 from gui.i18n import T                                # noqa: E402
 from agent import brain                               # noqa: E402
 
-# ── Estilo / colores Maxi Send (firmes, apegados al logo) ───────────────────
-AZUL = "#173B8A"        # azul royal sólido del logo
-AZUL_CLARO = "#1E4BB8"  # hover
-VERDE = "#7BC143"       # verde vivo del swoosh
-VERDE_OSC = "#5CA328"
+# ── Colores OFICIALES de la marca (extraídos del logo oficial) ──────────────
+AZUL = "#425CC7"        # azul Maxi (del ícono oficial)
+AZUL_CLARO = "#5670D6"  # hover
+AZUL_OSC = "#31469B"    # fondo del bloque del logo
+VERDE = "#93D400"       # verde Maxi (swoosh y slogan)
+VERDE_OSC = "#7BB200"
 TINTA = "#14213d"       # texto oscuro sólido
 
-LOGO_SVG = f"""
-<svg width="220" height="86" viewBox="0 0 220 86" xmlns="http://www.w3.org/2000/svg">
-  <path d="M112 20 a26 26 0 0 1 44 0" fill="none" stroke="{VERDE}" stroke-width="12" stroke-linecap="round"/>
-  <text x="8" y="60" font-family="Arial Black, Arial, sans-serif" font-weight="900"
-        font-size="52" fill="{AZUL}">maxi</text>
-  <text x="120" y="78" font-family="Arial, sans-serif" font-weight="700"
-        font-size="22" letter-spacing="6" fill="{AZUL}">SEND</text>
-</svg>
-"""
+# ── Logos oficiales (gui/assets) ────────────────────────────────────────────
+ASSETS = Path(__file__).parent / "assets"
+LOGO_PATH = ASSETS / "maxisend_logo.png"     # wordmark + slogan (texto BLANCO)
+ICONO_PATH = ASSETS / "maxisend_icono.png"   # ícono azul/verde (fondo claro)
+
+
+@st.cache_data(show_spinner=False)
+def _img_b64(path_str: str) -> str:
+    """PNG → base64 (cacheado) para incrustarlo en HTML."""
+    try:
+        return base64.b64encode(Path(path_str).read_bytes()).decode()
+    except Exception:
+        return ""
 
 
 def _lng() -> str:
@@ -87,10 +93,30 @@ def _css():
     """, unsafe_allow_html=True)
 
 
-def _logo(center=False, ancho=220):
-    svg = LOGO_SVG.replace('width="220"', f'width="{ancho}"') if ancho != 220 else LOGO_SVG
+def _logo(center=False, ancho=210):
+    """Logo OFICIAL de Maxi Send. Su wordmark es BLANCO (versión para fondo
+    oscuro), así que se presenta sobre un bloque azul de marca — se ve nítido y
+    respeta la identidad. Si el archivo faltara, cae al ícono o a texto."""
+    b64 = _img_b64(str(LOGO_PATH))
     align = "center" if center else "left"
-    st.markdown(f"<div style='text-align:{align}'>{svg}</div>", unsafe_allow_html=True)
+    if b64:
+        st.markdown(
+            f"""<div style='text-align:{align}'>
+                  <div style='display:inline-block;background:{AZUL_OSC};
+                              padding:14px 20px;border-radius:14px;'>
+                    <img src="data:image/png;base64,{b64}" width="{ancho}"
+                         alt="Maxi Send"/>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+        return
+    ib64 = _img_b64(str(ICONO_PATH))
+    if ib64:
+        st.markdown(f"<div style='text-align:{align}'>"
+                    f"<img src='data:image/png;base64,{ib64}' width='64' alt='Maxi'/>"
+                    f"</div>", unsafe_allow_html=True)
+        return
+    st.markdown(f"<h3 style='text-align:{align};color:{AZUL}'>maxi send</h3>",
+                unsafe_allow_html=True)
 
 
 def _card_html(acento: str, titulo: str, texto: str) -> str:
@@ -473,6 +499,8 @@ def vista_agente():
                 extra["FLOW_OVERRIDES"] = json.dumps(plan["overrides"])
             if plan.get("tipo_envio"):
                 extra["FLOW_TYPE"] = plan["tipo_envio"]
+            if plan.get("max_casos"):
+                extra["MAX_CASOS"] = str(plan["max_casos"])
             _iniciar("run_agente", plan["test"], args,
                      ambiente=plan.get("ambiente", "test"),
                      extra=extra or None, casos=plan.get("casos"),
@@ -487,7 +515,9 @@ def vista_agente():
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    st.set_page_config(page_title="Maxi · QA", page_icon="🤖", layout="wide")
+    # Favicon: ícono OFICIAL de Maxi Send (si falta, emoji de respaldo).
+    icono = str(ICONO_PATH) if ICONO_PATH.exists() else "🤖"
+    st.set_page_config(page_title="Maxi · QA", page_icon=icono, layout="wide")
     _css()
 
     if st.session_state.get("despedida"):

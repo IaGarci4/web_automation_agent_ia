@@ -174,6 +174,11 @@ def extraer_duracion(instruccion: str) -> int:
     """Duración pedida en SEGUNDOS: 'por 2 minutos', 'durante 30 segundos',
     'por 1 hora'. 0 si no se menciona (entonces manda la cantidad de veces)."""
     t = normalizar_texto_simple(instruccion.lower())
+    # Frases sin número: 'media hora' = 30 min · 'hora y media' = 90 min.
+    if re.search(r"\bhora\s+y\s+media\b", t):
+        return 5400
+    if re.search(r"\bmedia\s+hora\b", t):
+        return 1800
     m = re.search(r"(\d+)\s*(?:horas?|hrs?|\bh\b)", t)
     if m:
         return int(m.group(1)) * 3600
@@ -590,6 +595,17 @@ def interpretar(instruccion: str, catalogo: dict) -> dict:
                 codes = " or ".join(p["code"] for p in payers_solicitados)
                 kexpr = f"({kexpr}) and ({codes})"
 
+        # CANTIDAD de ejecuciones: si el usuario NO pidió cantidad ni tiempo,
+        # se ejecuta UNA sola (la etiqueta está parametrizada por pagador y si no
+        # se limita corre TODOS). Con 'N veces' → N casos. Con tiempo → hasta
+        # cumplirlo (una ejecución por vuelta).
+        max_casos = None
+        if duracion_seg:
+            max_casos = 1            # una por vuelta; el ciclo lo repite por tiempo
+        elif veces > 1:
+            max_casos = veces
+        else:
+            max_casos = 1
         # Etiqueta de test más legible cuando hay repetición.
         _rep = (f" · {veces}x" if veces > 1 else
                 (f" · {duracion_seg}s" if duracion_seg else ""))
@@ -598,12 +614,14 @@ def interpretar(instruccion: str, catalogo: dict) -> dict:
             "test": f"etiqueta ({kexpr or 'todas'}){_rep}",
             "archivo": "src/tests/etiquetas",
             "kexpr": kexpr,
-            "veces": veces, "duracion_seg": duracion_seg,
+            "veces": 1 if duracion_seg else 1,   # la repetición la da max_casos/tiempo
+            "duracion_seg": duracion_seg,
+            "max_casos": max_casos,
             "overrides": overrides, "montos": montos,
             "cancelar": cancelar,
             "razon": f"etiqueta(s) de deploy: {kexpr or 'todas'}"
-                     + (f" repetida {veces} veces" if veces > 1 else "")
-                     + (f" durante {duracion_seg}s" if duracion_seg else ""),
+                     + (f" — {veces} ejecución(es)" if veces > 1 else " — 1 ejecución")
+                     + (f", repitiendo durante {duracion_seg}s" if duracion_seg else ""),
         }
 
     # ── Análisis / descubrimiento de catálogo (corre el analizer) ──
@@ -633,7 +651,7 @@ def interpretar(instruccion: str, catalogo: dict) -> dict:
                     "test": f"test_envio_normal ({len(todos_activos)} pagadores de {modulo} — TODOS los activos)",
                     "archivo": f"src/tests/test_envio_normal_{modulo}.py",
                     "kexpr": None, "tipo_envio": detectar_tipo_envio(instruccion),
-                    "casos": [p["code"] for p in todos_activos],
+                    "casos": [p["code"] for p in todos_activos], "duracion_seg": duracion_seg,
                     "veces": veces, "overrides": overrides, "montos": montos, "cancelar": cancelar,
                     "razon": f"envío normal a TODOS los pagadores activos de {modulo} "
                              f"({len(todos_activos)}: {', '.join(p['code'] for p in todos_activos)})",
@@ -692,7 +710,7 @@ def interpretar(instruccion: str, catalogo: dict) -> dict:
                 "test": test_name,
                 "archivo": f"src/tests/test_envio_normal_{modulo}.py",
                 "kexpr": kexpr, "tipo_envio": _tipo,
-                "casos": [p["code"] for p in payers],
+                "casos": [p["code"] for p in payers], "duracion_seg": duracion_seg,
                 "veces": veces, "overrides": overrides, "montos": montos, "cancelar": cancelar,
                 "razon": razon,
             }

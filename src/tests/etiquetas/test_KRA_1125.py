@@ -35,6 +35,13 @@ from src.pagadores import flujo_mt as F
 logger = get_logger("KRA-1125")
 
 PAYERS, CIUDADES = F.cargar_catalogo(modulo="colombia")
+
+# LÍMITE de casos a ejecutar (env MAX_CASOS, lo fija el agente/GUI). Sin límite
+# corre TODOS los pagadores del catálogo; el agente pone 1 si no se pidió
+# cantidad ni tiempo, o N si se pidieron N ejecuciones.
+_MAX_CASOS = int(os.getenv("MAX_CASOS", "0") or 0)
+if _MAX_CASOS > 0:
+    PAYERS = PAYERS[:_MAX_CASOS]
 _PAYER_IDS = [p["code"] for p in PAYERS]
 
 COMPLETAR = os.getenv("COMPLETAR_ENVIO", "1").strip().lower() in ("1", "true", "si", "yes")
@@ -48,7 +55,7 @@ _BTN_CONTINUE            = "transfer-continue-button-0-button"
 
 # Pausa (ms) para DEJAR VISIBLE la corrección del teléfono con el panel de
 # información desplegado, antes de dar Continue. Configurable por entorno.
-_PAUSA_VISUAL_MS = int(os.getenv("KRA_PAUSE_MS", "5000"))
+_PAUSA_VISUAL_MS = int(os.getenv("KRA_PAUSE_MS", "2000"))
 
 EVIDENCE = "KRA-1125"
 _SUCCESS_TESTID = "transfers-container-modal-success-transfer-0-decline-button"
@@ -200,10 +207,12 @@ async def _asegurar_info_desplegada(flow, *, pausa_ms=0):
                     await page.wait_for_timeout(400)
             except Exception:
                 pass
-    # Centrar el teléfono en la vista (no cambia el estado del panel).
+    # Centrar el teléfono en la vista (no cambia el estado del panel). CON timeout
+    # corto: si el elemento no está adjunto (panel colapsado), evaluate esperaría
+    # ~30s por defecto → aquí se rinde en 1.5s.
     try:
         await page.get_by_test_id(BENEF_PHONE_TESTID).first.evaluate(
-            "(el) => el.scrollIntoView({block: 'center'})")
+            "(el) => el.scrollIntoView({block: 'center'})", timeout=1_500)
     except Exception:
         pass
     if pausa_ms:
@@ -342,20 +351,17 @@ async def _corregir_telefono_y_enviar(flow, tel_bueno, *, logger, screenshot=Non
         return False
 
     # ── 3. Evidencia: campo OK + boton habilitado ─────────────────────────────
-    # MANTENER el panel de información DESPLEGADO y hacer una pausa para VISUALIZAR
-    # la corrección del teléfono (VR KRA-1125) antes de dar Continue. No se colapsa.
-    await _asegurar_info_desplegada(flow, pausa_ms=_PAUSA_VISUAL_MS)
+    # El campo YA quedó corregido y verificado (paso 1). Aquí NO se re-expande el
+    # panel (eso podía colgarse ~30s buscando un elemento no adjunto): solo una
+    # pausa breve para la evidencia y captura simple. Prioridad: dar Continue en
+    # cuanto está habilitado.
+    await flow.page.wait_for_timeout(_PAUSA_VISUAL_MS)
     if screenshot and ev:
         try:
-            await screenshot.screenshot_with_highlight(
-                ev("negativo_campo_corregido.png"),
-                locators=[flow.page.get_by_test_id(BENEF_PHONE_TESTID).first])
+            await screenshot.screenshot_only(
+                screenshot_path=ev("negativo_campo_corregido.png"))
         except Exception:
-            try:
-                await screenshot.screenshot_only(
-                    screenshot_path=ev("negativo_campo_corregido.png"))
-            except Exception:
-                pass
+            pass
 
     # ── 4. Continue ──────────────────────────────────────────────────────────
     try:
@@ -516,10 +522,13 @@ async def test_KRA_1125_telefono_sin_573_rechazado(logged_page: Page, payer_cfg:
     logger.info("[KRA-1125] NEGATIVO | %s | destino=%s/%s | payer_city=%s | tel_malo=%s (prefijo %s)",
                 cfg["code"], ciudad, estado, cfg["payer_city"], tel_malo, primer_malo)
 
+    # NOTA: el beneficiario se colapsa durante el llenado (si no, TAPA la sección
+    # de tarifa/monto del depósito y el clic hace timeout). El panel se RE-ABRE
+    # solo en la corrección del teléfono (_asegurar_info_desplegada, idempotente),
+    # que es donde importa dejarlo visible.
     await F.llenar_formulario_completo(
         flow, datos, cfg, pais, ciudad, estado,
-        monto=int(float(datos.monto())), tipo="deposit", benef_phone=tel_malo,
-        colapsar_beneficiario=False)   # el panel del beneficiario queda ABIERTO
+        monto=int(float(datos.monto())), tipo="deposit", benef_phone=tel_malo)
 
     await F.seleccionar_pagador(flow, cfg, logger, tipo="deposit")
     await flow.seleccionar_deposit_account_type()
@@ -542,3 +551,19 @@ async def test_KRA_1125_telefono_sin_573_rechazado(logged_page: Page, payer_cfg:
         f"pero el modal de exito no aparecio."
     )
     logger.info("[KRA-1125] NEGATIVO OK -- VR rechaza 4X; corregido a 3X, transaccion procesada.")
+
+    # Cancelación (si la instrucción pidió 'cancela' → FLOW_CANCEL=1): usa el
+    # MÓDULO de cancelación de Money Transfer (Reportes → buscar por cliente →
+    # cancelar). El cliente es el que se generó en el llenado (Faker cacheado).
+    if CANCELAR:
+        cliente = datos.nombre_cliente()
+        logger.info("[KRA-1125] Cancelando la transacción de '%s'...", cliente)
+        try:
+            from src.sanity_general import cancelacion as C
+            cancelada = await C.cancelar_por_cliente(
+                flow, cliente, logger=logger, reason_index=0,
+                notes="Automation KRA-1125")
+            logger.info("[KRA-1125] Cancelación %s.",
+                        "OK" if cancelada else "no confirmada")
+        except Exception as e:
+            logger.warning("[KRA-1125] No se pudo cancelar: %s", e)

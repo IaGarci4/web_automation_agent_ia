@@ -45,7 +45,14 @@ def main():
         "--server.headless", "true",
         "--browser.gatherUsageStats", "false",
     ]
-    subprocess.run(cmd, cwd=str(RAIZ))
+    # Ctrl+C detiene Streamlit; el proceso padre también recibe la señal. Lo
+    # atrapamos para salir LIMPIO (sin traceback de KeyboardInterrupt).
+    try:
+        subprocess.run(cmd, cwd=str(RAIZ))
+    except KeyboardInterrupt:
+        print("\n👋 GUI detenida. ¡Hasta pronto!")
+    except Exception as e:
+        print(f"\nGUI finalizada ({e}).")
 
 
 if __name__ == "__main__":
