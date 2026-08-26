@@ -534,7 +534,7 @@ def interpretar(instruccion: str, catalogo: dict) -> dict:
             "test": f"Sanity General — TODOS ({ambiente})",
             "archivo": "src/tests/sanity_general",
             "kexpr": None, "marker": "sanity_general", "ambiente": ambiente,
-            "casos": ["CP01", "CP02", "CP03", "CP04", "CP05", "CP06"],
+            "casos": ["CP01", "CP02", "CP03", "CP04", "CP05", "CP06", "CP07", "CP09"],
             "veces": 1, "overrides": {}, "montos": [], "cancelar": False,
             "razon": f"Sanity General COMPLETO en ambiente {ambiente.upper()}",
         }

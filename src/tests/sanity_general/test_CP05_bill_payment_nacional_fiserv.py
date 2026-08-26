@@ -1,6 +1,6 @@
 """
-CP06 — Bill Payment Nacional con servicio Fiserv.
-(Rescate de `HERMES2-qa/.../test_CP06_bill_payment_nacional_and_vip_card_fiserv.py`.)
+CP05 — Bill Payment Nacional con servicio Fiserv.
+(Rescate de `HERMES2-qa/.../test_CP05_bill_payment_nacional_and_vip_card_fiserv.py`.)
 
 IDÉNTICO a CP05 salvo el servicio (Fiserv) y sus datos. Reutiliza por completo
 el módulo src/sanity_general/bill_payment.py (el llenado nacional es agnóstico al
@@ -12,7 +12,7 @@ Flujo:
   3. Continuar habilitado → pagar → cancelar desde Reportes (resaltando el registro).
 
 COMO CORRER:
-    pytest src/tests/sanity_general -k CP06 -v -s --headed
+    pytest src/tests/sanity_general -k CP05 -v -s --headed
 """
 import os
 import pytest
@@ -25,25 +25,25 @@ from src.helpers.screenshot_helper import ScreenshotHelper
 from src.sanity_general import bill_payment as BP
 from src.sanity_general import Evidencia
 
-logger = get_logger("CP06")
+logger = get_logger("CP05")
 
 # ── Datos del caso (cambian según ambiente test/prod; override por env) ──────
-CUSTOMER_PHONE = os.getenv("CP06_PHONE",   settings.por_ambiente("5435345345", "4353454354"))
-FISERV_BILLER  = os.getenv("CP06_BILLER",  settings.por_ambiente(
+CUSTOMER_PHONE = os.getenv("CP05_PHONE",   settings.por_ambiente("5435345345", "4353454354"))
+FISERV_BILLER  = os.getenv("CP05_BILLER",  settings.por_ambiente(
     "Comcast XFINITY SameDay", "Comcast XFINITY Cable Todas las Cuentas"))
-FISERV_ACCOUNT = os.getenv("CP06_ACCOUNT", settings.por_ambiente(
+FISERV_ACCOUNT = os.getenv("CP05_ACCOUNT", settings.por_ambiente(
     "8495443022532599", "8495443022532599"))
-FISERV_ZIP     = os.getenv("CP06_ZIP",     settings.por_ambiente("75001-4444", "45002-4444"))
+FISERV_ZIP     = os.getenv("CP05_ZIP",     settings.por_ambiente("75001-4444", "45002-4444"))
 
 COMPLETAR = os.getenv("COMPLETAR_ENVIO", "1").strip().lower() in ("1", "true", "si", "yes")
-CANCELAR  = os.getenv("CP06_CANCELAR", "1").strip().lower() in ("1", "true", "si", "yes")
-EVIDENCE  = "CP06_bill_payment_nacional_fiserv"
+CANCELAR  = os.getenv("CP05_CANCELAR", "1").strip().lower() in ("1", "true", "si", "yes")
+EVIDENCE  = "CP05_bill_payment_nacional_fiserv"
 
 
 @pytest.mark.sanity_general
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language,width,height", [("English", 1366, 768)])
-async def test_CP06_bill_payment_nacional_fiserv(logged_page: Page, language, width, height):
+async def test_CP05_bill_payment_nacional_fiserv(logged_page: Page, language, width, height):
     flow = HmTransferelektraPage(logged_page)
     screenshot = ScreenshotHelper(logged_page)
     evi = Evidencia(screenshot, EVIDENCE)
@@ -57,7 +57,7 @@ async def test_CP06_bill_payment_nacional_fiserv(logged_page: Page, language, wi
     await BP.close_customer_search_table(flow)
     customer_name = await BP.get_customer_name(flow)
     assert customer_name, "El nombre del cliente debe poblarse tras la selección."
-    logger.info("[CP06] Cliente: %s", customer_name)
+    logger.info("[CP05] Cliente: %s", customer_name)
     await evi.shot("customer_loaded")
 
     # ── Step 2: Nacional + Fiserv ────────────────────────────────────────────
@@ -69,7 +69,7 @@ async def test_CP06_bill_payment_nacional_fiserv(logged_page: Page, language, wi
 
     assert await BP.is_continue_enabled(flow), \
         "El botón Continuar debe habilitarse tras llenar los campos."
-    logger.info("[CP06] Continuar habilitado ✓ (monto %s).", amount)
+    logger.info("[CP05] Continuar habilitado ✓ (monto %s).", amount)
     await evi.shot("fiserv_form_filled", locators=[logged_page.get_by_test_id(BP.CONTINUE_BTN)])
 
     # ── Step 3: Pagar ────────────────────────────────────────────────────────
@@ -77,15 +77,15 @@ async def test_CP06_bill_payment_nacional_fiserv(logged_page: Page, language, wi
         await BP.click_continue(flow)
         await BP.summary_pagar(flow)
         await evi.shot("payment_confirmed")
-        logger.info("[CP06] Pago Fiserv confirmado ✓.")
+        logger.info("[CP05] Pago Fiserv confirmado ✓.")
     else:
-        logger.info("[CP06] COMPLETAR_ENVIO=0 — pago NO realizado (solo armado).")
+        logger.info("[CP05] COMPLETAR_ENVIO=0 — pago NO realizado (solo armado).")
 
     # ── Cancelación desde Reportes (por teléfono, tipo BILL PAYMENT) ─────────
     if COMPLETAR and CANCELAR:
         cancelado = await BP.cancelar_bill_payment(
-            flow, CUSTOMER_PHONE, logger=logger, evi=evi, notes="Automation CP06")
+            flow, CUSTOMER_PHONE, logger=logger, evi=evi, notes="Automation CP05")
         assert cancelado, "El pago de bill no se pudo cancelar."
-        logger.info("[CP06] Cancelación OK.")
+        logger.info("[CP05] Cancelación OK.")
     else:
-        logger.info("[CP06] Cancelación OMITIDA (CP06_CANCELAR=0 o sin pago).")
+        logger.info("[CP05] Cancelación OMITIDA (CP05_CANCELAR=0 o sin pago).")

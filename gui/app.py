@@ -368,7 +368,10 @@ def vista_dashboard():
             st.session_state.vista = "agente"; st.rerun()
 
 
-CP_SANITY = ["CP01", "CP02", "CP03", "CP04", "CP05", "CP06", "CP07"]
+# Casos del sanity + sub-casos ejecutables por separado (los dos bill payment
+# comparten el número CP05, como en el sanity original).
+CP_SANITY = ["CP01", "CP02", "CP03", "CP04", "CP05",
+             "CP05_fidelity", "CP05_fiserv", "CP06", "CP07", "CP09"]
 
 
 def vista_sanity():
@@ -376,16 +379,19 @@ def vista_sanity():
     amb = st.radio(T("environment"), ["test", "prod"], horizontal=True,
                    format_func=lambda v: T(v))
     # Opciones: (clave, etiqueta). clave='all' o 'CP0x'
-    opciones = [("all", T("all_sanity"))] + [(cp, runner.nombre_cp(cp, _lng())) for cp in CP_SANITY]
+    opciones = ([("all", T("all_sanity"))] +
+                [(cp, runner.etiqueta_caso(cp, _lng())) for cp in CP_SANITY])
     sel = st.selectbox(T("what_run"), opciones, format_func=lambda o: o[1])
     if st.button(T("run"), type="primary"):
         if sel[0] == "all":
             args = ["src/tests/sanity_general", "-m", "sanity_general"]
-            casos, label = list(CP_SANITY), "Sanity General — TODOS"
+            casos, label = ["CP01", "CP02", "CP03", "CP04", "CP05", "CP06",
+                            "CP07", "CP09"], \
+                           "Sanity General — TODOS"
         else:
             cp = sel[0]
-            args = ["src/tests/sanity_general", "-k", cp]
-            casos, label = [cp], f"Sanity General — {cp}"
+            args = ["src/tests/sanity_general", "-k", runner.kexpr_caso(cp)]
+            casos, label = [cp.split("_")[0]], f"Sanity General — {sel[1]}"
         _iniciar("run_sanity", f"{label} ({T(amb)})", args, ambiente=amb, casos=casos)
     panel_vivo("run_sanity", "sanity")
     vista_historial("sanity")

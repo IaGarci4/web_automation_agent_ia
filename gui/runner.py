@@ -31,19 +31,45 @@ CP_NOMBRES = {
     "CP02": "Money Transfer OFAC + cancelación",
     "CP03": "Money Transfer Depósito + Tarjeta de débito",
     "CP04": "Money Transfer doméstico ATM (multi-agente)",
-    "CP05": "Bill Payment nacional — Fidelity Express",
-    "CP06": "Bill Payment nacional — Fiserv",
-    "CP07": "Recargas (Top Ups) — Lunex/DTOne",
+    "CP05": "Bill Payment nacional (Fidelity + Fiserv)",
+    "CP06": "Recargas (Top Ups) — Lunex/DTOne",
+    "CP07": "Cheque individual (scan) + rechazo en Chronos",
+    "CP09": "Pagos en Línea (depósito, cargo y pago)",
 }
 CP_NOMBRES_EN = {
     "CP01": "Money Transfer Cash + KYC",
     "CP02": "Money Transfer OFAC + cancellation",
     "CP03": "Money Transfer Deposit + Debit card",
     "CP04": "Domestic ATM Money Transfer (multi-agent)",
-    "CP05": "Domestic Bill Payment — Fidelity Express",
-    "CP06": "Domestic Bill Payment — Fiserv",
-    "CP07": "Top-Ups (Recharges) — Lunex/DTOne",
+    "CP05": "Domestic Bill Payment (Fidelity + Fiserv)",
+    "CP06": "Top-Ups (Recharges) — Lunex/DTOne",
+    "CP07": "Individual check scan + reject in Chronos",
+    "CP09": "Online Payments (deposit, charge and payment)",
 }
+
+# Sub-casos que se pueden correr por separado (además del CP completo).
+# clave → (etiqueta ES, etiqueta EN, expresión -k)
+SUBCASOS = {
+    "CP05_fidelity": ("CP05 · Bill Payment — Fidelity Express",
+                      "CP05 · Bill Payment — Fidelity Express",
+                      "CP05 and fidelity"),
+    "CP05_fiserv":   ("CP05 · Bill Payment — Fiserv",
+                      "CP05 · Bill Payment — Fiserv",
+                      "CP05 and fiserv"),
+}
+
+
+def etiqueta_caso(clave: str, lang: str = "es") -> str:
+    """Etiqueta legible de un CP o de un sub-caso (CP05_fidelity, …)."""
+    if clave in SUBCASOS:
+        es, en, _ = SUBCASOS[clave]
+        return en if lang == "en" else es
+    return nombre_cp(clave, lang)
+
+
+def kexpr_caso(clave: str) -> str:
+    """Expresión -k de un CP o sub-caso."""
+    return SUBCASOS[clave][2] if clave in SUBCASOS else clave
 
 
 def nombre_cp(cp: str, lang: str = "es") -> str:

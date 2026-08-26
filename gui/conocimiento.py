@@ -20,11 +20,16 @@ con Python + Playwright + pytest. Conoces TODO el proyecto:
   • CP02 — Money Transfer con OFAC hit (beneficiario sancionado) + cancelación.
   • CP03 — Money Transfer Depósito + Tarjeta de Débito (POS) + cuestionario completo.
   • CP04 — Doméstico ATM multi-agente + doble OFAC + cancelación.
-  • CP05 — Bill Payment nacional Fidelity Express + cancelación.
-  • CP06 — Bill Payment nacional Fiserv + cancelación.
-  • CP07 — Recargas (Top Ups) Lunex/DTOne: Mega Top Ups (iframe Lunex) y Top Ups
+  • CP05 — Bill Payment nacional: Fidelity Express y Fiserv (los dos son CP05,
+    como en el sanity original) + cancelación.
+  • CP06 — Recargas (Top Ups) Lunex/DTOne: Mega Top Ups (iframe Lunex) y Top Ups
     regular. NO completa la recarga (número real; se detiene en 'Send' visible).
-  (Pendientes: CP09-CP22, fase Chronos KYC/OFAC Hold.)
+  • CP07 — Cheque individual: escaneo (emulador), edición, procesar, status
+    'Verify Hold' en Reportes, y rechazo desde Chronos > Processing >
+    Edited Checks (motivo 'Other').
+  • CP09 — Pagos en Línea: en Chronos depósito + otro cargo + validación
+    del balance del agente (Collection), y en Hermes el pago en línea.
+  (Pendientes: CP10-CP22, y los Hold de Chronos de CP01-CP04.)
 - ETIQUETAS de deploy (validaciones que liberan a producción): p.ej. KRA-1125
   (Validation Rule del teléfono 573 para Uniteller Colombia en Depósito).
 - ENVÍOS por pagador (data-driven): catálogo src/pagadores/<pais>/payers.json
