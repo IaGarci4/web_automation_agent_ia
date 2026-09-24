@@ -71,27 +71,66 @@ async def _click_js(page, selector: str, desc: str) -> bool:
         return False
 
 
+async def cerrar_warning_salir(page, timeout_ms: int = 4_000) -> bool:
+    """Cierra el 'Warning: Are you sure you want to leave this page?' (YES, Leave).
+
+    Sondea cada 150 ms y clickea en cuanto aparece. Antes esto se hacía con
+    `is_visible(timeout=5000)`, pero `is_visible()` NO acepta `timeout` en el
+    Playwright actual: lanzaba TypeError, el `except` lo tragaba y el modal
+    quedaba abierto — la app no navegaba y el caso esperaba en vano."""
+    deny = page.locator(DENY_BTN).filter(has_text=RE_YES_LEAVE).first
+    generico = page.locator(DENY_BTN).first
+    espera = 0
+    while espera <= timeout_ms:
+        for btn, etiqueta in ((deny, "YES, Leave"), (generico, "deny")):
+            try:
+                if await btn.is_visible():
+                    if await _click_tolerante(btn, timeout=3_000):
+                        logger.info("[Pagos] Modal de salida cerrado (%s, %.1f s).",
+                                    etiqueta, espera / 1000)
+                        await page.wait_for_timeout(400)
+                        return True
+            except Exception:
+                pass
+        await page.wait_for_timeout(150)
+        espera += 150
+    return False
+
+
 async def abrir_pagos_en_linea(flow) -> bool:
-    """Navbar 'Online Payments' / 'Pagos en Línea' (+ modal de salida si aparece)."""
+    """Navbar 'Online Payments' / 'Pagos en Línea' (+ modal de salida si aparece).
+
+    VERIFICA la navegación: si el Warning se cerró pero la app siguió en
+    /transfers, se vuelve a pulsar el menú. Sin esta comprobación el caso
+    continuaba en la pantalla equivocada y fallaba 3 minutos después buscando
+    una cuenta que nunca iba a estar ahí."""
     page = flow.page
     logger.info("[Pagos] Abriendo Pagos en Línea…")
+    link = page.locator(NAVBAR_LINK_SEL).filter(has_text=RE_ONLINE_PAY).first
     try:
-        link = page.locator(NAVBAR_LINK_SEL).filter(has_text=RE_ONLINE_PAY).first
-        await link.wait_for(state="visible", timeout=TIMEOUT)
-        await _click_tolerante(link)
+        await link.wait_for(state="visible", timeout=30_000)
     except Exception as e:
         logger.warning("[Pagos] No se encontró el menú de pagos: %s", str(e)[:90])
         return False
-    # Modal 'YES, Leave' al salir de otra pantalla (opcional)
-    try:
-        deny = page.locator(DENY_BTN).filter(has_text=RE_YES_LEAVE).first
-        if await deny.is_visible(timeout=5_000):
-            await _click_tolerante(deny)
-            logger.info("[Pagos] Modal de salida cerrado (YES, Leave).")
-    except Exception:
-        pass
-    await page.wait_for_timeout(1_500)
-    return True
+
+    for intento in (1, 2, 3):
+        await _click_tolerante(link)
+        await cerrar_warning_salir(page)
+        # ¿Salimos de la pantalla anterior?
+        espera = 0
+        while espera <= 12_000:
+            url = (page.url or "").lower()
+            if "online" in url or "payment" in url or "pagos" in url:
+                logger.info("[Pagos] En Pagos en Línea (intento %d) — %s",
+                            intento, page.url)
+                await page.wait_for_timeout(800)
+                return True
+            await cerrar_warning_salir(page, timeout_ms=300)
+            await page.wait_for_timeout(300)
+            espera += 300
+        logger.warning("[Pagos] Seguimos en %s — reintento %d.", page.url, intento)
+    logger.error("[Pagos] No se pudo salir de la pantalla anterior.")
+    return False
 
 
 async def revisar_terminos_nueva_cuenta(flow, evi=None) -> bool:
@@ -126,22 +165,45 @@ async def revisar_terminos_nueva_cuenta(flow, evi=None) -> bool:
         return False
 
 
-async def elegir_cuenta(flow, alias: str) -> bool:
-    """Selecciona la cuenta por su ALIAS en la tabla."""
-    page = flow.page
+async def alias_disponibles(page) -> list:
+    """Alias que la tabla de cuentas muestra ahora mismo."""
     try:
-        fila = page.locator(_fila_alias(alias)).first
-        await fila.wait_for(state="visible", timeout=TIMEOUT)
-        try:
-            await fila.scroll_into_view_if_needed(timeout=5_000)
-        except Exception:
-            pass
-        ok = await _click_tolerante(fila)
-        logger.info("[Pagos] Cuenta '%s' seleccionada (%s).", alias, "ok" if ok else "falló")
-        return ok
-    except Exception as e:
-        logger.warning("[Pagos] No se encontró la cuenta '%s': %s", alias, str(e)[:90])
+        celdas = page.locator('//tbody[contains(@class,"p-datatable-tbody")]'
+                              '//td[contains(@class,"td-alias")]')
+        return [(t or "").strip()
+                for t in await celdas.all_inner_texts() if (t or "").strip()]
+    except Exception:
+        return []
+
+
+async def elegir_cuenta(flow, alias: str, timeout_ms: int = 30_000) -> bool:
+    """Selecciona la cuenta por su ALIAS en la tabla.
+
+    Si no aparece, DICE QUÉ ALIAS SÍ HAY. Antes esperaba 3 minutos y fallaba sin
+    dar pista alguna de si el problema era el alias o la pantalla."""
+    page = flow.page
+    fila = page.locator(_fila_alias(alias)).first
+    try:
+        await fila.wait_for(state="visible", timeout=timeout_ms)
+    except Exception:
+        disponibles = await alias_disponibles(page)
+        if disponibles:
+            logger.warning("[Pagos] El alias '%s' no está. La tabla muestra: %s",
+                           alias, ", ".join(f"'{a}'" for a in disponibles[:15]))
+            logger.warning("[Pagos] Ajusta CP09_ALIAS a uno de esos "
+                           "(o el default por ambiente en el test).")
+        else:
+            logger.warning("[Pagos] La tabla de cuentas está vacía o no cargó "
+                           "(URL: %s). Revisa que la navegación llegó a Pagos "
+                           "en Línea.", page.url)
         return False
+    try:
+        await fila.scroll_into_view_if_needed(timeout=5_000)
+    except Exception:
+        pass
+    ok = await _click_tolerante(fila)
+    logger.info("[Pagos] Cuenta '%s' seleccionada (%s).", alias, "ok" if ok else "falló")
+    return ok
 
 
 async def pagar(flow, monto: str = "1", evi=None) -> bool:

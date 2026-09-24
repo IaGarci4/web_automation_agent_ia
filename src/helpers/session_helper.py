@@ -13,12 +13,63 @@ Uso (lo invoca la fixture logged_page de conftest.py):
     await helper.ensure_logged_in()
 """
 
+import json
 import re
+from pathlib import Path
 
 from config import settings
 from config.logger import get_logger
 
 logger = get_logger("session")
+
+
+# ── Vinculación sesión ↔ usuario ─────────────────────────────────────────────
+# La sesión persistente (cookies + localStorage) se guarda junto a un "sidecar"
+# que anota QUÉ usuario la generó. Así, si cambian las credenciales en el .env
+# (p. ej. de una agencia a otra), la sesión vieja se descarta y se hace login
+# limpio en vez de operar con el usuario equivocado.
+
+def _sidecar(storage_path) -> Path:
+    return Path(str(storage_path) + ".user")
+
+
+def marcar_sesion(storage_path, user: str) -> None:
+    """Escribe el sidecar con el usuario dueño de la sesión."""
+    try:
+        _sidecar(storage_path).write_text(
+            json.dumps({"user": (user or "").strip()}), encoding="utf-8")
+    except Exception as e:
+        logger.warning("[Sesión] No se pudo marcar el usuario de la sesión: %s",
+                       str(e)[:90])
+
+
+def sesion_es_del_usuario(storage_path, user: str) -> bool:
+    """True solo si la sesión guardada pertenece a `user` (según el sidecar).
+
+    Si NO hay sidecar (sesión antigua sin marca), devuelve False a propósito:
+    así se fuerza un login limpio una vez y la sesión queda marcada. Esto evita
+    el bug de operar con un usuario/agencia distinto al configurado."""
+    try:
+        sc = _sidecar(storage_path)
+        if not sc.exists():
+            return False
+        data = json.loads(sc.read_text(encoding="utf-8"))
+        return (data.get("user") or "").strip() == (user or "").strip()
+    except Exception:
+        return False
+
+
+def descartar_sesion(storage_path) -> None:
+    """Borra la sesión guardada y su sidecar (fuerza login limpio)."""
+    for p in (Path(str(storage_path)), _sidecar(storage_path)):
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+# Botón que descarta el modal «Instalación Requerida» del Hardware Agent.
+_RE_CONTINUAR = re.compile(r"continuar|continue|aceptar|accept|omitir|skip", re.I)
 
 # Confirmación del modal "Éxito — agencia de comunicación 'PC'. ¿Desea continuar?"
 # El botón es data-testid='test-id-button' (GENÉRICO) con texto "SÍ, Continuar"/
@@ -168,6 +219,53 @@ class SessionHelper:
             # Fallback si el navegador no soporta blur sobre el locator
             await self.page.keyboard.press("Tab")
 
+    async def cerrar_modal_instalacion(self, timeout_ms: int = 6_000) -> bool:
+        """Descarta el modal «Instalación Requerida» del Hardware Agent.
+
+        Hermes lo muestra en el login cuando no detecta el Maxitransfer Hardware
+        Agent. Es un `role=dialog` que **intercepta los eventos de puntero**: el
+        campo de usuario se ve visible y habilitado, pero el clic nunca le llega
+        y el login muere con un timeout de 30 s que apunta al sitio equivocado.
+
+        Se cierra con «Continuar/Continue» (o la X) y el flujo sigue: la mayoría
+        de los casos no necesitan el agente. Los que sí (KRA-1527) fallarán más
+        adelante en su propia comprobación, que es donde corresponde."""
+        page = self.page
+        candidatos = (
+            page.get_by_role("button", name=_RE_CONTINUAR),
+            page.locator("div[id*='modal-installation-required'] button"),
+            page.locator("div.modal.show button").filter(has_text=_RE_CONTINUAR),
+            page.locator("div[id*='modal-installation-required'] .close, "
+                         "div[id*='modal-installation-required'] button.close"),
+        )
+        espera = 0
+        while espera <= timeout_ms:
+            try:
+                dialogo = page.locator(
+                    "div[id*='modal-installation-required']").first
+                if not await dialogo.is_visible():
+                    return False
+            except Exception:
+                return False
+            for loc in candidatos:
+                try:
+                    btn = loc.first
+                    if not await btn.is_visible():
+                        continue
+                    await btn.click(force=True, timeout=4_000)
+                    await page.wait_for_timeout(700)
+                    logger.info("[Login] Modal 'Instalación Requerida' "
+                                "descartado (el Hardware Agent no está "
+                                "corriendo o no fue detectado).")
+                    return True
+                except Exception:
+                    continue
+            await page.wait_for_timeout(200)
+            espera += 200
+        logger.warning("[Login] El modal 'Instalación Requerida' sigue en "
+                       "pantalla; sus overlays van a bloquear el formulario.")
+        return False
+
     async def _login(self) -> None:
         if not self.user or not self.password:
             logger.warning("Usuario/clave vacíos — define credenciales en .env")
@@ -177,6 +275,9 @@ class SessionHelper:
         enviar  = self._loc(settings.LOGIN_SUBMIT_TESTID, settings.LOGIN_SUBMIT_SELECTOR).first
 
         await usuario.wait_for(state="visible", timeout=settings.TIMEOUT_ELEMENT)
+        # ANTES de teclear: si el modal del Hardware Agent está encima, el clic
+        # en el campo no llega y el login se cae con un timeout engañoso.
+        await self.cerrar_modal_instalacion()
         await self._escribir(usuario, self.user)
         await self._escribir(clave, self.password)
 
@@ -235,7 +336,10 @@ class SessionHelper:
     async def _guardar_sesion(self) -> None:
         settings.SESSION_DIR.mkdir(parents=True, exist_ok=True)
         await self.context.storage_state(path=str(self.storage_state))
-        logger.info(f"Sesión guardada en {self.storage_state}")
+        # Marca la sesión con el usuario que la generó (para invalidarla si
+        # cambian las credenciales).
+        marcar_sesion(self.storage_state, self.user)
+        logger.info(f"Sesión guardada en {self.storage_state} (usuario: {self.user})")
 
 
 # ── Selección de agencia (perfil MULTIAGENTE) ───────────────────────────────

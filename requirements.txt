@@ -13,6 +13,8 @@ pytest-xdist>=3.5.0       # ejecución en paralelo (-n N) del sanity_general
 Faker>=24.0.0             # datos de relleno aleatorios (cliente/beneficiario)
 Pillow>=10.0.0            # screenshots con resaltado
 python-dotenv>=1.0.0      # carga del .env
+requests>=2.31.0          # cliente HTTP (API de QMetry)
+pypdf>=4.0.0              # lectura del PDF de balance (CP12)
 
 # ── Interfaz gráfica ─────────────────────────────────────────────────────────
 streamlit>=1.37.0         # GUI (login, dashboard, sanity, runner en vivo); st.fragment(run_every)

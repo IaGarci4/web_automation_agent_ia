@@ -90,7 +90,7 @@ async def main() -> int:
                     print("📱 Cuando te llegue la notificación, APRUEBA el acceso "
                           "en tu celular (hay hasta "
                           f"{CR.TIMEOUT_2FA // 60000} min).\n")
-                    if await CR.login_google(pagina):
+                    if await CR.login(pagina):
                         await CR.guardar_cookies(contexto)
                         print("\n✅ Listo. Los tests de Chronos ya NO harán login.")
                         print("   Vuelve a correr esta herramienta cuando la sesión expire.")
@@ -114,7 +114,8 @@ async def main() -> int:
                     break
                 # Chequeo RÁPIDO (1.5 s) para no inflar el tiempo de espera.
                 try:
-                    if await pagina.locator(CR.TOOLBAR_MENU).first.is_visible(timeout=1_500):
+                    # is_visible() no acepta timeout — se usa el sondeo del módulo.
+                    if await CR.sesion_activa(pagina, timeout_ms=1_500):
                         print("✓ Sesión detectada.")
                         await CR.guardar_cookies(contexto)
                         print("\n✅ Listo. Los tests de Chronos ya NO harán login.")

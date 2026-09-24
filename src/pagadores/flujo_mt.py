@@ -85,6 +85,71 @@ def destino(cfg: dict, ciudades: dict, rng):
     return pais, ciudad, estado
 
 
+STATE_BENEF = "transfer-beneficiary-state-0-input"
+
+
+async def elegir_primer_estado(flow) -> str:
+    """Abre el desplegable de State del beneficiario y elige la 1ª opción.
+
+    Sirve cuando el caso no fija un estado concreto: el campo es obligatorio,
+    así que dejarlo vacío bloquea el envío. Devuelve el valor que quedó."""
+    page = flow.page
+    try:
+        campo = page.get_by_test_id(STATE_BENEF).first
+        await campo.click(force=True, timeout=5_000)
+        await page.wait_for_timeout(700)
+        opcion = page.locator("li[role='option'], .p-dropdown-item, "
+                              "[role='option']").first
+        await opcion.wait_for(state="visible", timeout=6_000)
+        texto = (await opcion.inner_text() or "").strip()
+        await opcion.click(force=True, timeout=4_000)
+        await page.wait_for_timeout(500)
+        try:
+            flow.logger.info("State del beneficiario (1ª opción): '%s'", texto)
+        except Exception:
+            pass
+        return texto
+    except Exception as e:
+        try:
+            flow.logger.warning("No se pudo elegir el State del beneficiario: %s",
+                                str(e)[:90])
+        except Exception:
+            pass
+        return ""
+
+
+async def _llenar_direccion_cliente(flow, datos, max_intentos: int = 10) -> bool:
+    """Dirección del cliente resolviendo el validador REAL de Hermes en el orden
+    correcto: dirección primero → elegir una verificada → poner el ZIP de esa
+    dirección. Reintenta con otras del catálogo si alguna no verifica. El
+    validador exige que la dirección exista EN el zip del campo; NO ajusta el zip
+    al elegir, por eso NO se pre-llena el zip."""
+    try:
+        from src.helpers.direcciones_us import candidatos
+        cands = candidatos(max_intentos)
+    except Exception:
+        cands = [{"direccion": datos.valor("address", "address"),
+                  "zip": datos.valor("us_zip", "us_zip")}]
+    for i, dom in enumerate(cands, 1):
+        try:
+            ok, elegido, _sug = await flow.resolver_direccion_cliente(
+                dom["direccion"], zip_preferido=dom.get("zip", ""),
+                ciudad=dom.get("ciudad", ""), estado=dom.get("estado", ""))
+        except Exception as e:
+            flow.logger.warning("Dirección intento %d: excepción %s", i, str(e)[:100])
+            ok = False
+        if ok:
+            flow.logger.info("Dirección del cliente verificada al intento %d.", i)
+            return True
+        try:
+            await flow.fill_transfer_customer_address_0_input("")
+            await flow.fill_transfer_customer_zip_code_0_input("")
+        except Exception:
+            pass
+    flow.logger.error("Ninguna dirección del catálogo verificó contra el validador.")
+    return False
+
+
 async def llenar_hasta_monto(flow, datos, cfg, pais, ciudad, estado) -> float:
     """Cliente + beneficiario (país del pagador; ciudad/estado aleatorios) + tarifa + monto."""
     await flow.navigate()
@@ -93,9 +158,8 @@ async def llenar_hasta_monto(flow, datos, cfg, pais, ciudad, estado) -> float:
     await flow.fill_transfer_customer_first_lastname_0_input(datos.valor("customer_last1", "last_name"))
     await flow.fill_transfer_customer_second_lastname_0_input(datos.valor("customer_last2", "last_name"))
     await flow.click_close_table()
-    await flow.fill_transfer_customer_address_0_input(datos.valor("address", "address"))
-    await flow.fill_transfer_customer_zip_code_0_input(datos.valor("us_zip", "us_zip"))
-    await flow.esperar_autocomplete_cp()
+    # Dirección: validador real de Hermes (dirección primero → elige → su zip).
+    await _llenar_direccion_cliente(flow, datos)
     await flow.click_transfer_beneficiary_toggle_fi()
     await flow.click_transfer_beneficiary_clear_0_i()
     await flow.fill_transfer_beneficiary_country_0_dropdown_input(pais)
@@ -107,7 +171,14 @@ async def llenar_hasta_monto(flow, datos, cfg, pais, ciudad, estado) -> float:
     await flow.fill_transfer_beneficiary_address_0_input(datos.valor("address", "address"))
     await flow.fill_transfer_beneficiary_zip_code_0_input(datos.valor("zip", "zip"))
     await flow.fill_transfer_beneficiary_city_0_input(ciudad)     # ALEATORIO (del país)
-    await flow.fill_transfer_beneficiary_state_0_input(estado)    # ALEATORIO (del país)
+    # ESTADO: campo OBLIGATORIO. Si el caller no lo pasa se elige la primera
+    # opción del desplegable, en vez de teclear cadena vacía — eso dejaba el
+    # campo en rojo ('Required Field') y el envío no continuaba, mientras el log
+    # decía "✓ typeahead ''" como si hubiera funcionado.
+    if str(estado or "").strip():
+        await flow.fill_transfer_beneficiary_state_0_input(estado)
+    else:
+        await elegir_primer_estado(flow)
     await flow.fill_transfer_beneficiary_date_of_birth_0_input(datos.valor("date", "date"))
     await flow.fill_transfer_beneficiary_email_0_input(datos.valor("email", "email"))
     await flow.scroll_219px()
@@ -189,9 +260,8 @@ async def llenar_formulario_completo(flow, datos, cfg, pais, ciudad, estado, mon
         await flow.click_close_table()
     except Exception:
         pass
-    await flow.fill_transfer_customer_address_0_input(datos.valor("address", "address"))
-    await flow.fill_transfer_customer_zip_code_0_input(datos.valor("us_zip", "us_zip"))
-    await flow.esperar_autocomplete_cp()
+    # Dirección: validador real de Hermes (dirección primero → elige → su zip).
+    await _llenar_direccion_cliente(flow, datos)
     # 2) BENEFICIARIO: país + detalle (expandido con verificación)
     await set_beneficiary_expandido(flow, True)
     await flow.click_transfer_beneficiary_clear_0_i()
@@ -218,7 +288,14 @@ async def llenar_formulario_completo(flow, datos, cfg, pais, ciudad, estado, mon
     await flow.fill_transfer_beneficiary_address_0_input(datos.valor("address", "address"))
     await flow.fill_transfer_beneficiary_zip_code_0_input(datos.valor("zip", "zip"))
     await flow.fill_transfer_beneficiary_city_0_input(ciudad)     # ALEATORIO (del país)
-    await flow.fill_transfer_beneficiary_state_0_input(estado)    # ALEATORIO (del país)
+    # ESTADO: campo OBLIGATORIO. Si el caller no lo pasa se elige la primera
+    # opción del desplegable, en vez de teclear cadena vacía — eso dejaba el
+    # campo en rojo ('Required Field') y el envío no continuaba, mientras el log
+    # decía "✓ typeahead ''" como si hubiera funcionado.
+    if str(estado or "").strip():
+        await flow.fill_transfer_beneficiary_state_0_input(estado)
+    else:
+        await elegir_primer_estado(flow)
     await flow.fill_transfer_beneficiary_date_of_birth_0_input(datos.valor("date", "date"))
     await flow.fill_transfer_beneficiary_email_0_input(datos.valor("email", "email"))
     # 3) COLAPSAR (revela Totales) + elegir TIPO de envío + sección Transfer.
@@ -258,9 +335,48 @@ async def llenar_formulario_completo(flow, datos, cfg, pais, ciudad, estado, mon
         await flow.wait_for_no_blocking_overlays()
         await flow.fill_monto(
             "transfer-payers-money-info-amount-0-atm-amount-input", monto_str)
+    elif tipo == "home":
+        # Sub-formulario HOME DELIVERY (entrega a domicilio; lo usa CP11).
+        # Orden: ciudad → monto. A diferencia de depósito, aquí la TARIFA llega
+        # preseleccionada y el monto se habilita solo un instante después de
+        # elegir la ciudad; por eso se espera a que el campo sea editable en vez
+        # de clickearlo a ciegas (daba 'Element is not visible' sobre un input
+        # 'readonly disabled'). La tarifa y el pagador quedan como respaldos por
+        # si algún pagador sí los exige antes del importe.
+        await flow.select_typeahead(
+            "transfer-payers-money-info-city-0-home-dropdown-input",
+            cfg.get("payer_city") or ciudad)
+        await flow.wait_for_no_blocking_overlays()
+        campo_monto = "transfer-payers-money-info-amount-0-home-amount-input"
+        # La TARIFA de Home suele venir preseleccionada (el dropdown llega con
+        # `p-inputwrapper-filled`), así que solo se toca si el monto sigue
+        # bloqueado: intentarlo siempre costaba segundos y ensuciaba el log.
+        if not await esperar_campo_habilitado(flow, campo_monto, timeout_ms=4_000):
+            await flow.seleccionar_fee_type("home", cfg.get("fee_type") or "")
+            await flow.wait_for_no_blocking_overlays()
+        if not await esperar_campo_habilitado(flow, campo_monto):
+            # Puede ser el PAGADOR el que habilita el monto (en cash/deposit es
+            # al revés). Se elige el pagador y se vuelve a intentar, en vez de
+            # estrellarse con 'Element is not visible' sobre un input disabled.
+            try:
+                flow.logger.info(
+                    "[home] El monto sigue deshabilitado tras la tarifa — "
+                    "elijo el pagador primero.")
+            except Exception:
+                pass
+            await seleccionar_pagador_home(
+                flow, cfg.get("search", cfg.get("code", "")),
+                getattr(flow, "logger", None))
+            await flow.wait_for_no_blocking_overlays()
+            if not await esperar_campo_habilitado(flow, campo_monto):
+                raise AssertionError(
+                    "El campo de monto de HOME DELIVERY sigue deshabilitado "
+                    "tras elegir ciudad, tarifa y pagador. Revisa qué dato "
+                    "falta en esa pantalla.")
+        await flow.fill_monto(campo_monto, monto_str)
     else:
-        # home/mobile: el tab ya quedó seleccionado; sus campos siguen
-        # PENDIENTES de mapear (Consulta #2).
+        # mobile: el tab ya quedó seleccionado; sus campos siguen PENDIENTES
+        # de mapear (faltan sus data-testid).
         try:
             flow.logger.warning(
                 f"[tipo={tipo}] Tab seleccionado. Sub-formulario de '{tipo}' aún "
@@ -429,6 +545,117 @@ async def seleccionar_pagador_atm(flow, search, logger=None):
     await flow.wait_for_no_blocking_overlays()
 
 
+async def esperar_campo_habilitado(flow, testid: str, timeout_ms: int = 10_000) -> bool:
+    """Espera a que un input deje de estar `disabled`/`readonly`.
+
+    Los sub-formularios de Hermes habilitan sus campos en cascada (la tarifa
+    habilita el monto, el monto habilita el pagador…). Sin esta espera el error
+    que sale es 'Element is not visible', que apunta al sitio equivocado."""
+    campo = flow.page.get_by_test_id(testid).first
+    espera = 0
+    while espera <= timeout_ms:
+        try:
+            if await campo.is_editable():
+                return True
+        except Exception:
+            pass
+        await flow.page.wait_for_timeout(250)
+        espera += 250
+    return False
+
+
+async def esperar_pagador_autoseleccionado(flow, testid: str,
+                                           timeout_ms: int = 10_000) -> str:
+    """Espera a que Hermes AUTOSELECCIONE el pagador; devuelve su valor o ''.
+
+    En Home Delivery el pagador se asigna solo unos segundos después de escribir
+    el monto. Leerlo de inmediato lo encontraba vacío y disparaba la apertura de
+    un modal que no correspondía — y ahí se perdían dos minutos de reintentos."""
+    campo = flow.page.get_by_test_id(testid).first
+    espera = 0
+    while espera <= timeout_ms:
+        try:
+            valor = (await campo.input_value() or "").strip()
+            if valor:
+                return valor
+        except Exception:
+            pass
+        await flow.page.wait_for_timeout(400)
+        espera += 400
+    return ""
+
+
+async def seleccionar_pagador_home(flow, search, logger=None,
+                                   branch_code: str = None):
+    """Pagador de HOME DELIVERY (lo usa CP11).
+
+    Particularidad de esta pantalla: al escribir el monto, Hermes suele
+    AUTOSELECCIONAR el pagador. Por eso primero se LEE el campo: si ya trae
+    valor no se toca nada (abrir el modal encima lo borraba). Si está vacío, se
+    abre el modal de búsqueda y se elige la fila por texto.
+
+    `branch_code`: se escribe solo si la pantalla reclama 'Bank Branch Code'."""
+    campo = "transfer-payers-money-info-payer-0-home-input"
+    actual = await esperar_pagador_autoseleccionado(flow, campo)
+    if actual:
+        if logger:
+            logger.info("Pagador HOME autoseleccionado: '%s' — no se toca.", actual)
+    else:
+        if logger:
+            logger.info("seleccionar_pagador_home (modal): %s", search)
+        await flow.click_payer_field("home")
+        # Confirmar que el modal ABRIÓ antes de teclear: si no, los reintentos
+        # de buscar_pagador_rapido tardan ~2 min en rendirse contra una pantalla
+        # donde el buscador ni existe.
+        buscador = flow.page.get_by_test_id(
+            "transfers-money-info-modal-search-payer-0-input-search-input").first
+        try:
+            await buscador.wait_for(state="visible", timeout=8_000)
+        except Exception:
+            raise AssertionError(
+                "El modal de pagador de HOME DELIVERY no abrió y el campo "
+                f"quedó vacío (esperaba '{search}'). Puede que este pagador se "
+                "asigne solo y la pantalla necesite otro dato antes.")
+        await flow.buscar_pagador_rapido(search, "")
+        await flow.wait_for_no_blocking_overlays()
+    if branch_code:
+        await escribir_branch_code_si_aplica(flow, branch_code, logger)
+    await flow.scroll_230px()
+
+
+# Tooltip que reclama el código de sucursal (bilingüe).
+_TOOLTIP_BRANCH = ("div#tooltip:has-text('Bank Branch Code field is required'), "
+                   "div#tooltip:has-text('Código de sucursal')")
+_BRANCH_INPUT = "transfer-payers-money-info-branch-code-0-deposit-input"
+
+
+async def escribir_branch_code_si_aplica(flow, branch_code: str, logger=None) -> bool:
+    """Escribe el Bank Branch Code SOLO si la pantalla lo está reclamando.
+
+    Se decide por el tooltip de validación, no a ciegas: en la mayoría de los
+    pagadores el campo no existe y escribir en él rompería el formulario."""
+    try:
+        tooltip = flow.page.locator(_TOOLTIP_BRANCH).first
+        if not await tooltip.is_visible():
+            if logger:
+                logger.info("No se requiere Bank Branch Code.")
+            return False
+    except Exception:
+        return False
+    try:
+        campo = flow.page.get_by_test_id(_BRANCH_INPUT).first
+        await campo.click()
+        await campo.fill("")
+        await campo.type(str(branch_code), delay=100)
+        if logger:
+            logger.info("Bank Branch Code '%s' escrito.", branch_code)
+        return True
+    except Exception as e:
+        if logger:
+            logger.warning("No se pudo escribir el Branch Code: %s", str(e)[:80])
+        return False
+
+
 async def seleccionar_pagador(flow, cfg, logger=None, seleccionar_sucursal=True, tipo="cash"):
     """Selección GENÉRICA de pagador (cualquiera del catálogo), para el TIPO dado
     (cash/deposit/...). Abre el campo Payer del sub-formulario correcto.
@@ -520,8 +747,100 @@ async def _click_back_to_transfer(flow, logger=None) -> bool:
     return False
 
 
+_RE_REQUERIDO = re.compile(r"required field|campo requerido|campo obligatorio", re.I)
+
+
+async def campos_requeridos_visibles(flow, limite: int = 6) -> list:
+    """Etiquetas de los campos marcados como obligatorios sin llenar.
+
+    Hermes pinta 'Required Field' bajo el campo en rojo. Detectarlo permite
+    cortar el bucle de Continue con un diagnóstico útil, en vez de reintentar
+    hasta agotar los intentos."""
+    try:
+        avisos = flow.page.get_by_text(_RE_REQUERIDO)
+        total = min(await avisos.count(), limite)
+    except Exception:
+        return []
+    etiquetas = []
+    for i in range(total):
+        aviso = avisos.nth(i)
+        try:
+            if not await aviso.is_visible():
+                continue
+            # El nombre del campo suele estar en el contenedor del aviso.
+            texto = await aviso.evaluate(
+                "(el) => { const c = el.closest('div'); "
+                " return c ? (c.innerText || '').trim() : ''; }")
+            etiquetas.append(" ".join((texto or "requerido").split())[:60])
+        except Exception:
+            continue
+    return etiquetas
+
+
+# Botón AFIRMATIVO del modal de éxito ("¿desea imprimir el recibo?"). El único
+# testid mapeado del modal es el de declinar, así que el afirmativo se busca por
+# variantes de testid y, si no, por texto bilingüe. Se confirma con dom_audit.
+_SUCCESS_ACCEPT_TESTIDS = (
+    "transfers-container-modal-success-transfer-0-accept-button",
+    "transfers-container-modal-success-transfer-0-confirm-button",
+    "transfers-container-modal-success-transfer-0-approve-button",
+    "modal-confirmation-confirm-button",
+)
+_RE_IMPRIMIR = re.compile(r"^\s*(yes|s[ií])\b|print|imprimir", re.I)
+
+
+async def aceptar_impresion_recibo(flow, logger=None, evi=None) -> bool:
+    """Pulsa el botón AFIRMATIVO del modal de éxito para IMPRIMIR el recibo.
+
+    Es lo contrario de lo que hace el sanity (que declina para no bloquearse con
+    el diálogo de impresión). Lo usa KRA-1527: sin aceptar, `Hermes2Agent.exe`
+    nunca recibe el mensaje y no hay nada que auditar."""
+    page = flow.page
+    decline = _SUCCESS_DECLINE_TESTID
+    for tid in _SUCCESS_ACCEPT_TESTIDS:
+        try:
+            btn = page.get_by_test_id(tid).first
+            if await btn.is_visible():
+                await btn.click(force=True, timeout=5_000)
+                if logger:
+                    logger.info("[Recibo] Impresión ACEPTADA (testid %s).", tid)
+                await page.wait_for_timeout(2_500)
+                return True
+        except Exception:
+            continue
+    # Respaldo por texto, excluyendo explícitamente el botón de declinar.
+    try:
+        candidatos = page.locator("div.modal-content button, .modal button")
+        total = min(await candidatos.count(), 10)
+        for i in range(total):
+            b = candidatos.nth(i)
+            try:
+                if not await b.is_visible():
+                    continue
+                if (await b.get_attribute("data-testid") or "") == decline:
+                    continue
+                texto = (await b.inner_text() or "").strip()
+                if _RE_IMPRIMIR.search(texto):
+                    await b.click(force=True, timeout=5_000)
+                    if logger:
+                        logger.info("[Recibo] Impresión ACEPTADA por texto ('%s').",
+                                    texto)
+                    await page.wait_for_timeout(2_500)
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    if logger:
+        logger.warning("[Recibo] No encontré el botón para ACEPTAR la impresión "
+                       "— el Hardware Agent no será invocado. Confirma el testid "
+                       "del botón afirmativo con dom_audit.")
+    return False
+
+
 async def completar_envio(flow, completar=True, logger=None, evi=None,
-                          pos_pago=False, tipo_envio="cash"):
+                          pos_pago=False, tipo_envio="cash",
+                          imprimir_recibo=False):
     """Termina la transacción: Continue → (resumen) → YES, Send → declina recibo.
 
     Maneja el mensaje INFORMATIVO de compliance/OFAC (beneficiario sancionado):
@@ -606,6 +925,16 @@ async def completar_envio(flow, completar=True, logger=None, evi=None,
             # Nada apareció en la ventana: reintentar Continue en la próxima vuelta.
             if logger:
                 logger.info("Sin mensaje ni resumen (intento %d) — reintento Continue.", intento)
+            # Si el formulario tiene un campo marcado como obligatorio, insistir
+            # es tiempo perdido: Continue nunca va a avanzar. Se corta y se dice
+            # QUÉ falta, en vez de scrollear ocho veces contra el mismo error.
+            faltantes = await campos_requeridos_visibles(flow)
+            if faltantes:
+                if logger:
+                    logger.error("El formulario tiene campos obligatorios sin "
+                                 "llenar: %s — Continue no puede avanzar.",
+                                 ", ".join(faltantes))
+                return False
 
         if not resumen:
             if logger:
@@ -653,10 +982,16 @@ async def completar_envio(flow, completar=True, logger=None, evi=None,
         except Exception:
             if logger:
                 logger.info("Modal de éxito no detectado por testid — continúo al cierre.")
-        try:
-            await flow.click_no()
-        except Exception:
-            pass
+        if imprimir_recibo:
+            # KRA-1527: aquí SÍ se acepta, para que Hermes hable con el
+            # Hardware Agent. Declinar dejaría la prueba sin comunicación que
+            # auditar (falso negativo).
+            await aceptar_impresion_recibo(flow, logger=logger, evi=evi)
+        else:
+            try:
+                await flow.click_no()
+            except Exception:
+                pass
         await flow.wait_for_no_blocking_overlays()
         if logger:
             logger.info("✅ Transacción COMPLETADA (enviada).")

@@ -62,6 +62,16 @@ STR = {
     "what_run": {"es": "¿Qué ejecutar?", "en": "What to run?"},
     "all_sanity": {"es": "Todo el Sanity General", "en": "Whole Sanity General"},
     "run": {"es": "▶ Ejecutar", "en": "▶ Run"},
+    "qmetry_subir": {"es": "Subir evidencias a QMetry",
+                     "en": "Upload evidence to QMetry"},
+    "qmetry_subir_help": {
+        "es": "Adjunta las capturas al paso correspondiente del Test Cycle.",
+        "en": "Attaches the screenshots to the matching Test Cycle step."},
+    "qmetry_estatus": {"es": "Actualizar estatus (Pass/Fail/NA)",
+                       "en": "Update status (Pass/Fail/NA)"},
+    "qmetry_estatus_help": {
+        "es": "Escribe el resultado en QMetry según el veredicto real de la prueba.",
+        "en": "Writes the result in QMetry from the test's actual verdict."},
 
     # ── Pagadores ──
     "payers_title": {"es": "💸 Transacciones por pagador", "en": "💸 Transactions by payer"},

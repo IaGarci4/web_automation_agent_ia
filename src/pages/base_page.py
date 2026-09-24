@@ -282,7 +282,11 @@ class BasePage(ABC):
         """
         valor = str(valor)
         await self._cerrar_autofill()
-        campo = self.page.get_by_test_id(test_id)
+        campo = self.page.get_by_test_id(test_id).first
+        try:                                   # traerlo a la vista (agente/WebView2)
+            await campo.scroll_into_view_if_needed(timeout=2_000)
+        except Exception:
+            pass
         await self._esperar_editable(campo)
         await campo.click(force=True)
         # Limpiar lo que haya (selección total + borrar)
@@ -653,6 +657,184 @@ class BasePage(ABC):
 
     # ── Cancelación de transacción (reusable en cualquier money transfer) ─────
 
+    # Selectores del menú kebab de una fila del reporte de transacciones.
+    # Están aquí (y no duplicados en cada flujo) porque los usan tanto la
+    # cancelación como el envío de fax del CP11.
+    _KEBAB_ESPERA = ("tr.report-transactions-result-row, "
+                     ".p-scroller-content .ng-star-inserted, "
+                     ".td-options .icon, button.report-transaction-menu-toggle, "
+                     "[data-testid*='menu-toggle']")
+    _KEBAB_CANDIDATOS = (
+        "button.report-transaction-menu-toggle",
+        "[data-testid*='menu-toggle']",
+        "[data-testid*='menu-icon']",
+        ".td-options .icon",
+        ".td-options button",
+        "tr.report-transactions-result-row .icon",
+    )
+
+    async def abrir_menu_transaccion(self, row_index: int = 0,
+                                     desc: str = "Reportes") -> bool:
+        """Abre el menú kebab de la fila `row_index` del reporte.
+
+        PRIMERO espera a que las filas RENDERICEN (aparecen ~2-3 s después de
+        pulsar Buscar). Sin esa espera, el recorrido de selectores se agotaba
+        con `count()==0` antes de que las filas existieran."""
+        self.logger.info("[%s] Abriendo menú de la transacción...", desc)
+        try:
+            await self.page.locator(self._KEBAB_ESPERA).first.wait_for(
+                state="visible", timeout=12_000)
+            await self.page.wait_for_timeout(500)
+        except Exception:
+            self.logger.warning("[%s] No aparecieron filas de resultado tras "
+                                "Buscar.", desc)
+        candidatos = list(self._KEBAB_CANDIDATOS)
+        candidatos.insert(3, f".p-scroller-content .ng-star-inserted:"
+                             f"nth-of-type({row_index + 1}) .td-options .icon")
+        for sel in candidatos:
+            try:
+                loc = self.page.locator(sel)
+                try:
+                    await loc.first.wait_for(state="visible", timeout=2_500)
+                except Exception:
+                    pass
+                cnt = await loc.count()
+                if cnt == 0:
+                    continue
+                target = loc.nth(row_index) if cnt > row_index else loc.first
+                await target.scroll_into_view_if_needed(timeout=2_000)
+                await target.click(force=True, timeout=3_000)
+                self.logger.info("[%s] Menú kebab abierto (selector: %s).", desc, sel)
+                await self.page.wait_for_timeout(400)
+                return True
+            except Exception:
+                continue
+        self.logger.warning("[%s] No abrí el menú kebab con los selectores "
+                            "conocidos.", desc)
+        return False
+
+    # Opciones del menú kebab de una transacción (bilingües).
+    _RE_SEND_FAX = re.compile(r"send\s*fax|enviar\s*fax", re.I)
+    # 'Cancel' EXACTO: sin el ancla, casaría también con 'Cancel Transaction'
+    # de otros menús o con el 'Cancelar' de un diálogo cualquiera.
+    _RE_CANCEL_MENU = re.compile(r"^\s*(cancel|cancelar)\s*$", re.I)
+
+    # Modal informativo con botón Accept/Aceptar (p.ej. tras 'Send Fax':
+    # "Insertion into fax queue was successful").
+    _RE_ACEPTAR = re.compile(r"^\s*(accept|aceptar|ok)\s*$", re.I)
+
+    async def cerrar_modal_notificacion(self, timeout_ms: int = 8_000) -> bool:
+        """Cierra el modal informativo con 'Accept' si está en pantalla.
+
+        Importa MÁS de lo que parece: mientras ese modal siga abierto, sus
+        overlays interceptan los clics de la pantalla de fondo. Ese fue el
+        motivo real de que la cancelación del CP11 no respondiera tras enviar
+        el fax: el menú se abría pero el clic en 'Cancel' no llegaba."""
+        candidatos = (
+            self.page.get_by_test_id("modal-notification-message-button"),
+            self.page.locator("div.modal-content button").filter(has_text=self._RE_ACEPTAR),
+            self.page.get_by_role("button", name=self._RE_ACEPTAR),
+        )
+        espera = 0
+        while espera <= timeout_ms:
+            for loc in candidatos:
+                try:
+                    btn = loc.first
+                    if not await btn.is_visible():
+                        continue
+                    await btn.click(force=True, timeout=3_000)
+                    self.logger.info("[Modal] Aviso cerrado con 'Accept'.")
+                    await self.page.wait_for_timeout(800)
+                    return True
+                except Exception:
+                    continue
+            await self.page.wait_for_timeout(200)
+            espera += 200
+        return False
+
+    async def enviar_fax_transaccion(self, row_index: int = 0, *,
+                                     evi=None, paso: int = None) -> bool:
+        """Menú kebab de la transacción → 'Send Fax' / 'Enviar Fax'.
+
+        Lo usa el CP11. Al terminar CIERRA el aviso de éxito ('Insertion into
+        fax queue was successful'), porque si queda abierto sus overlays
+        bloquean los clics de todo lo que venga después — eso impedía cancelar.
+
+        `evi`/`paso`: si se pasan, la evidencia se captura CON el aviso en
+        pantalla (es la prueba de que el fax se encoló) y recién después se
+        cierra. Devuelve True si la opción se pulsó."""
+        if not await self.abrir_menu_transaccion(row_index, desc="Fax"):
+            return False
+        candidatos = [
+            self.page.get_by_test_id("reports-transaction-menu--sendFax-paragraph-semi-bold"),
+            self.page.get_by_test_id("reports-transaction-menu-sendFax-paragraph-semi-bold"),
+            self.page.get_by_text(self._RE_SEND_FAX),
+        ]
+        for loc in candidatos:
+            try:
+                item = loc.first
+                await item.wait_for(state="visible", timeout=4_000)
+                await item.click(force=True, timeout=4_000)
+                self.logger.info("[Fax] Opción 'Send Fax' pulsada.")
+                await self.page.wait_for_timeout(2_500)
+                if evi is not None:          # evidencia CON el aviso visible
+                    try:
+                        await evi.shot("send_fax_disparado", paso=paso)
+                    except Exception:
+                        pass
+                if not await self.cerrar_modal_notificacion():
+                    self.logger.info("[Fax] No apareció aviso de confirmación.")
+                return True
+            except Exception:
+                continue
+        self.logger.warning("[Fax] No encontré la opción 'Send Fax' en el menú.")
+        return False
+
+    # Opción 'Print Receipt' / 'Imprimir Recibo' del menú de la transacción.
+    _RE_PRINT_RECIBO = re.compile(r"print\s*receipt|imprimir\s*recibo|"
+                                  r"reimprimir", re.I)
+
+    async def reimprimir_recibo_transaccion(self, row_index: int = 0, *,
+                                            evi=None, paso: int = None) -> bool:
+        """Menú kebab de la transacción → 'Print Receipt' / 'Imprimir Recibo'.
+
+        Es la REIMPRESIÓN desde el historial: una ruta al Hardware Agent
+        distinta de la del recibo que sale al terminar un envío. La usa el CP06
+        de KRA-1527.
+
+        Al terminar cierra el aviso de confirmación, igual que 'Send Fax': si
+        queda abierto, bloquea los clics de lo que venga después."""
+        if not await self.abrir_menu_transaccion(row_index, desc="Reimpresión"):
+            return False
+        candidatos = [
+            self.page.get_by_test_id(
+                "reports-transaction-menu--printReceipt-paragraph-semi-bold"),
+            self.page.get_by_test_id(
+                "reports-transaction-menu-printReceipt-paragraph-semi-bold"),
+            self.page.get_by_text(self._RE_PRINT_RECIBO),
+        ]
+        for loc in candidatos:
+            try:
+                item = loc.first
+                await item.wait_for(state="visible", timeout=4_000)
+                await item.click(force=True, timeout=4_000)
+                self.logger.info("[Reimpresión] 'Print Receipt' pulsado.")
+                await self.page.wait_for_timeout(3_000)
+                if evi is not None:
+                    try:
+                        await evi.shot("reimpresion_disparada", paso=paso)
+                    except Exception:
+                        pass
+                await self.cerrar_modal_notificacion()
+                return True
+            except Exception:
+                continue
+        self.logger.warning(
+            "[Reimpresión] No encontré 'Print Receipt' en el menú de la "
+            "transacción. El testid está documentado en el proyecto hermano "
+            "'ai_agent' pero no verificado aquí — confírmalo con dom_audit.")
+        return False
+
     async def cancelar_transaccion(self, reason_index: int = 0,
                                    notes: str = "Automation",
                                    row_index: int = 0) -> None:
@@ -671,58 +853,16 @@ class BasePage(ABC):
         Búsqueda por nombre: hazla antes con los campos del reporte; este
         método cancela la PRIMERA fila del resultado (row_index=0).
         """
-        # ── 1) Abrir menú kebab de la fila. PRIMERO se espera a que RENDERICEN
-        #       las filas del resultado (aparecen ~2-3 s después de dar Buscar).
-        #       Antes el chequeo corría de inmediato con count()==0 y saltaba
-        #       TODOS los selectores antes de que existieran las filas → "no abrí
-        #       el menú". Ahora se espera la tabla y cada candidato tiene su propia
-        #       espera breve. ──
-        self.logger.info("[Cancelación] Abriendo menú de la transacción...")
-        # Esperar a que aparezca alguna fila/kebab del reporte (hasta ~12 s)
-        try:
-            await self.page.locator(
-                "tr.report-transactions-result-row, .p-scroller-content .ng-star-inserted, "
-                ".td-options .icon, button.report-transaction-menu-toggle, "
-                "[data-testid*='menu-toggle']"
-            ).first.wait_for(state="visible", timeout=12_000)
-            await self.page.wait_for_timeout(500)
-        except Exception:
-            self.logger.warning("[Cancelación] No aparecieron filas de resultado tras Buscar.")
+        # ── 1) Abrir el menú kebab de la fila (lógica compartida con el envío
+        #       de fax del CP11: ver abrir_menu_transaccion). ──
+        await self.abrir_menu_transaccion(row_index, desc="Cancelación")
 
-        kebab_candidatos = [
-            "button.report-transaction-menu-toggle",
-            "[data-testid*='menu-toggle']",
-            "[data-testid*='menu-icon']",
-            f".p-scroller-content .ng-star-inserted:nth-of-type({row_index + 1}) .td-options .icon",
-            ".td-options .icon",
-            ".td-options button",
-            "tr.report-transactions-result-row .icon",
-        ]
-        abierto = False
-        for sel in kebab_candidatos:
-            try:
-                loc = self.page.locator(sel)
-                # Espera BREVE por si ese selector tarda en aparecer (no salta al toque)
-                try:
-                    await loc.first.wait_for(state="visible", timeout=2_500)
-                except Exception:
-                    pass
-                cnt = await loc.count()
-                if cnt == 0:
-                    continue
-                target = loc.nth(row_index) if cnt > row_index else loc.first
-                await target.scroll_into_view_if_needed(timeout=2_000)
-                await target.click(force=True, timeout=3_000)
-                self.logger.info(f"[Cancelación] Menú kebab abierto (selector: {sel}).")
-                abierto = True
-                break
-            except Exception:
-                continue
-        if not abierto:
-            self.logger.warning("[Cancelación] No abrí el menú kebab con los selectores conocidos.")
-        await self.page.wait_for_timeout(400)
-
-        # ── 2) Opción 'Cancel' del menú (testid del repo; se prueban variantes) ──
+        # ── 2) Opción 'Cancel' del menú ──
+        # Se prueban los testids conocidos y, si ninguno está, se cae al TEXTO
+        # bilingüe. Ese respaldo por texto es lo que hace funcionar 'Send Fax';
+        # Cancel no lo tenía y por eso el menú se abría pero la opción no se
+        # pulsaba (el modal de notas nunca aparecía y el paso moría a los 15 s).
+        elegida = False
         for tid in ("reports-transaction-menu-cancel-paragraph-semi-bold",
                     "reports-transaction-menu--cancel-paragraph-semi-bold"):
             try:
@@ -730,17 +870,38 @@ class BasePage(ABC):
                 if await item.count() == 0:
                     continue
                 await item.first.click(force=True, timeout=4_000)
+                elegida = True
                 break
             except Exception:
                 continue
+        if not elegida:
+            # Texto exacto para no confundir 'Cancel' con 'Cancel Transaction'
+            # de otros menús ni con el 'Cancelar' de un diálogo.
+            for loc in (self.page.get_by_text(self._RE_CANCEL_MENU),
+                        self.page.locator("p, span, div").filter(
+                            has_text=self._RE_CANCEL_MENU)):
+                try:
+                    item = loc.first
+                    await item.wait_for(state="visible", timeout=3_000)
+                    await item.click(force=True, timeout=3_000)
+                    self.logger.info("[Cancelación] Opción 'Cancel' pulsada (por texto).")
+                    elegida = True
+                    break
+                except Exception:
+                    continue
+        if not elegida:
+            self.logger.warning("[Cancelación] No encontré la opción 'Cancel' "
+                                "en el menú de la transacción.")
         await self.page.wait_for_timeout(500)
 
         # Confirmar diálogo de bill payment si aparece (opcional)
         try:
             conf = self.page.get_by_test_id("cancel-bill-payment-confirmation-deny-button")
-            if await conf.is_visible(timeout=1500):
-                await conf.click(force=True)
-                await self.page.wait_for_timeout(800)
+            # `is_visible()` NO acepta timeout: pasárselo lanza TypeError y el
+            # modal se quedaba abierto. Se espera con wait_for.
+            await conf.wait_for(state="visible", timeout=1_500)
+            await conf.click(force=True)
+            await self.page.wait_for_timeout(800)
         except Exception:
             pass
 

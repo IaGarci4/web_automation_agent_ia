@@ -28,11 +28,78 @@ import random
 import unicodedata
 from faker import Faker
 
-from src.helpers.zips_us import zip_aleatorio
+from src.helpers.zips_us import zip_aleatorio, US_STATES
+from src.helpers.direcciones_us import domicilio_aleatorio
 
 # Rango de montos para pruebas (USD, ENTEROS, sin centavos). Parametrizable.
 MONTO_MIN = 100
 MONTO_MAX = 400
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  REGLA DE CONTACTO — teléfonos y correos que NUNCA deben ser de alguien
+# ════════════════════════════════════════════════════════════════════════════
+#
+# En TEST un teléfono aleatorio no molesta a nadie. **En PRODUCCIÓN sí**: la
+# transacción es real, y Hermes ofrece mandar el recibo digital por SMS. Un
+# número inventado al azar tiene dueño; si acierta con uno activo, una persona
+# ajena recibe el recibo de una prueba. Eso es una fuga de datos de un cliente
+# real y no hay forma de deshacerlo.
+#
+# Por eso la regla no es «acordarse en producción», es que el generador lo haga
+# solo:
+#
+#     Ambiente TEST/STAGE  →  cualquier número (Faker)
+#     Ambiente PRODUCCIÓN  →  número IMPOSIBLE, reservado, sin destinatario
+#
+# Los rangos elegidos no son inventados:
+#
+#   • EE.UU. — el plan de numeración norteamericano (NANP) reserva el bloque
+#     `555-0100` a `555-0199` en CUALQUIER área para uso ficticio. Es el rango
+#     que se usa en cine y televisión justo para esto: no se asigna a nadie.
+#   • Correo — los dominios `example.com`/`.net`/`.org` están reservados por la
+#     RFC 2606 y no tienen buzones: un correo enviado ahí no llega a ningún
+#     sitio.
+#   • México — no existe un rango ficticio oficial. Se usa la LADA `555`, que
+#     no es asignable (Ciudad de México es la LADA `55`, de dos dígitos), así
+#     que no enruta. ⚠️ Antes de la primera corrida en producción conviene que
+#     Cumplimiento lo confirme; se puede cambiar sin tocar código con
+#     TEL_FICTICIO_MX.
+_AMBIENTES_PRODUCCION = ("PROD", "PRD", "PRODUCCION", "PRODUCCIÓN", "PRODUCTION",
+                         "LIVE")
+
+
+def es_produccion(ambiente: str = None) -> bool:
+    """True si el ambiente configurado es producción."""
+    amb = (ambiente or os.getenv("ENV") or os.getenv("AMBIENTE") or "").strip()
+    if not amb:
+        try:
+            from config import settings
+            amb = str(getattr(settings, "ENV", "") or "")
+        except Exception:
+            amb = ""
+    return amb.strip().upper() in _AMBIENTES_PRODUCCION
+
+
+def telefono_ficticio(pais: str = "us") -> str:
+    """Teléfono de 10 dígitos GARANTIZADO sin destinatario.
+
+    Se usa siempre que el ambiente sea producción, sin que el flujo tenga que
+    pedirlo: la protección que hay que recordar activar es la que un día se
+    olvida."""
+    if str(pais).lower().startswith(("mx", "mex")):
+        # LADA no asignable + 7 dígitos: 555 XXX XXXX
+        base = os.getenv("TEL_FICTICIO_MX", "555")
+        return base + "".join(str(random.randint(0, 9))
+                              for _ in range(max(0, 10 - len(base))))
+    # EE.UU.: área real + central 555 + línea 01NN (bloque ficticio del NANP)
+    area = os.getenv("TEL_FICTICIO_US_AREA", "210")
+    return f"{area}555{random.randint(100, 199):04d}"[:10]
+
+
+def correo_ficticio() -> str:
+    """Correo en un dominio reservado por la RFC 2606: no tiene buzón."""
+    return f"qa.kra{random.randint(1000, 9999)}@example.com"
 
 
 def _sin_acentos(texto: str) -> str:
@@ -63,6 +130,7 @@ class Datos:
         self._cliente = str(self.over.get("cliente", "")).split()
         self._benef = str(self.over.get("beneficiario", "")).split()
         self._cache = {}   # consistencia: misma semántica → mismo valor en la corrida
+        self._dom = None   # domicilio REAL elegido una vez: dirección y zip coherentes
 
     # ── Bandera de cancelación (la decide el usuario en lenguaje natural) ────
 
@@ -138,16 +206,47 @@ class Datos:
         n = random.randint(11, 16)
         return "".join(str(random.randint(0, 9)) for _ in range(n))
 
+    def telefono(self, pais: str = "us") -> str:
+        """Teléfono según la regla de ambiente. Úsalo en vez de Faker a pelo.
+
+        TEST → cualquiera. PRODUCCIÓN → imposible, sin destinatario."""
+        if es_produccion():
+            return telefono_ficticio(pais)
+        return self.fake.numerify("##########")
+
     def telefono_prefijo(self, prefijo: str = "573", largo: int = 10) -> str:
         """
         Teléfono que RESPETA un prefijo obligatorio (Validation Rule). Ej. para
         Uniteller Colombia el beneficiario debe empezar con '573' (KRA-1125):
         telefono_prefijo('573', 10) → '573' + 7 dígitos aleatorios.
+
+        En PRODUCCIÓN se conserva el prefijo —lo exige la validación— pero el
+        resto se rellena con un bloque que no enruta: los móviles colombianos
+        empiezan por 3, así que un abonado que arranca con 0 no existe. El
+        prefijo manda porque sin él el formulario se rechaza; lo que se elige es
+        que dentro de lo válido en forma, sea imposible en destino.
         """
         import random
         prefijo = "".join(ch for ch in str(prefijo) if ch.isdigit())
         faltan = max(0, largo - len(prefijo))
+        if es_produccion():
+            relleno = "000" + "".join(str(random.randint(0, 9))
+                                      for _ in range(max(0, faltan - 3)))
+            return prefijo + relleno[:faltan]
         return prefijo + "".join(str(random.randint(0, 9)) for _ in range(faltan))
+
+    # ── Domicilio REAL (dirección + zip coherentes) ─────────────────────────
+
+    def _domicilio(self) -> dict:
+        """Elige UN domicilio real la primera vez y lo reutiliza toda la corrida.
+
+        Así `us_zip` y `address` salen del MISMO lugar: la dirección existe y
+        casa con el ZIP, que es lo que exige el validador de Hermes. Ver
+        `direcciones_us.py`.
+        """
+        if self._dom is None:
+            self._dom = domicilio_aleatorio()
+        return self._dom
 
     # ── Faker por tipo de campo ────────────────────────────────────────────
 
@@ -160,20 +259,37 @@ class Datos:
         if "full" in t or "nombre" in t:
             return self.fake.name()
         if "phone" in t or "cell" in t or "tel" in t:
+            # En producción, número imposible SIEMPRE. Se decide aquí y no en
+            # cada flujo a propósito: si hay que acordarse de pedirlo, algún
+            # día no se pide — y el precio de ese día es que un cliente real
+            # reciba por SMS el recibo de una prueba.
+            if es_produccion():
+                pais = "mx" if ("benef" in t or "mx" in t) else "us"
+                return telefono_ficticio(pais)
             return self.fake.numerify("##########")
-        # ZIP de EE.UU. REAL (Hermes autocompleta City/State desde él).
-        # Debe ir ANTES del zip genérico porque "us_zip" contiene "zip".
+        # ZIP de EE.UU. REAL, del MISMO domicilio que la dirección (así casan).
+        # Hermes autocompleta City/State desde el zip. Debe ir ANTES del zip
+        # genérico porque "us_zip" contiene "zip".
         if "us_zip" in t or "uszip" in t:
-            return zip_aleatorio()
+            return self._domicilio()["zip"]
+        # Ciudad/estado de EE.UU. del mismo domicilio (por si un flujo los pide
+        # en vez de dejar que Hermes autocomplete). Estado en NOMBRE COMPLETO.
+        if "us_city" in t:
+            return self._domicilio()["ciudad"]
+        if "us_state" in t:
+            return US_STATES.get(self._domicilio()["estado"],
+                                 self._domicilio()["estado"])
         if "address" in t or "direccion" in t:
-            # Formato: "1452 road drive" — número de 4 dígitos + calle sin acentos
-            numero = random.randint(1000, 9999)
-            calle = _ascii_limpio(self.fake_en.street_name())
-            return f"{numero} {calle}"
+            # Dirección REAL (pública/comercial) que EXISTE y casa con el
+            # us_zip: el validador de Hermes exige que la dirección sea real.
+            # Ya no se inventa con Faker. Ver `direcciones_us.py`.
+            return _ascii_limpio(self._domicilio()["direccion"])
         if "zip" in t or "postal" in t:
             return self.fake.numerify("#####")
         if "email" in t or "mail" in t:
-            return self.fake.email()
+            # Mismo riesgo que el teléfono: el recibo digital también puede irse
+            # por correo. Faker inventa dominios que a veces existen de verdad.
+            return correo_ficticio() if es_produccion() else self.fake.email()
         if "city" in t or "ciudad" in t:
             return _sin_acentos(self.fake.city())
         if "date" in t or "fecha" in t or "birth" in t:

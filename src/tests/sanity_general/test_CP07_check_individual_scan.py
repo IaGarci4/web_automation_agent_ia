@@ -125,12 +125,12 @@ async def test_CP07_check_individual_scan(logged_page: Page, language, width, he
     # ── Steps 8–9: Chronos > Processing > Edited Checks ──────────────────────
     chronos_page = await logged_page.context.new_page()
     try:
-        # Reutiliza las cookies guardadas: si la sesión sigue viva NO hace login
-        # (el SSO de Google limita los intentos). Si entra, las vuelve a guardar.
+        # Reutiliza la sesión guardada; si expiró, hace el login por SSO SOLO
+        # (mismo comportamiento que Hermes) y la vuelve a guardar.
         dentro = await CR.abrir_chronos(chronos_page)
-        assert dentro, ("No se pudo entrar a Chronos. Si el SSO agotó intentos, "
-                        "entra manualmente una vez y reintenta (la sesión se "
-                        "guarda en session_state/chronos_cookies.json).")
+        assert dentro, ("No se pudo entrar a Chronos (ni con la sesión guardada "
+                        "ni con el login por SSO). Revisa CHRONOS_USER/"
+                        "CHRONOS_PASS y la aprobación del 2FA en el celular.")
 
         assert await CR.ir_a_edited_checks(chronos_page), \
             "No se pudo abrir Chronos > Processing > Edited Checks."

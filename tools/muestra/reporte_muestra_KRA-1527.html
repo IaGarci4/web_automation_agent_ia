@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<title>Inspección de Token en Memoria — KRA-1527</title>
+<style>
+  * { box-sizing:border-box; }
+  body { font-family:'Segoe UI',system-ui,sans-serif; margin:0; background:#0f172a; color:#e2e8f0; }
+  .wrap { max-width:1000px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:#94a3b8; font-size:13px; margin-bottom:22px; }
+  .hero { text-align:center; padding:26px; border-radius:14px; margin-bottom:24px;
+           background:linear-gradient(135deg,#1e293b,#0f172a); border:1px solid #334155; }
+  .hero .big { font-size:40px; font-weight:800; letter-spacing:1px; color:#DC2626; }
+  .hero .lbl { font-size:15px; margin-top:6px; color:#cbd5e1; }
+  .counts { display:flex; gap:12px; justify-content:center; margin-top:18px; flex-wrap:wrap; }
+  .count { padding:10px 18px; border-radius:10px; font-weight:700; font-size:14px; }
+  table.meta-t { width:100%; border-collapse:collapse; margin-bottom:24px; font-size:13px; }
+  table.meta-t td { padding:6px 10px; border-bottom:1px solid #1e293b; }
+  table.meta-t td:first-child { color:#94a3b8; width:180px; }
+  .card { background:#1e293b; border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+  .card-head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .badge { color:#fff; font-weight:700; font-size:12px; padding:3px 10px; border-radius:6px; }
+  .fname { font-weight:600; font-size:15px; }
+  .meta { font-size:13px; color:#cbd5e1; margin-bottom:6px; }
+  .kw { font-size:12px; color:#fbbf24; margin-bottom:8px; }
+  .jwt { padding:10px 12px; border-radius:8px; margin:8px 0; font-size:12px; }
+  .jwt.fail { background:#3f1d1d; border:1px solid #dc2626; }
+  .jwt.warn { background:#3a2f13; border:1px solid #d97706; }
+  .jwt-h { font-weight:700; margin-bottom:6px; }
+  .mono { font-family:Consolas,monospace; background:#0f172a; padding:6px 8px; border-radius:5px;
+           word-break:break-all; color:#f87171; }
+  .claims { margin-top:6px; color:#cbd5e1; }
+  .frag { background:#3a2f13; border:1px solid #d97706; padding:10px 12px; border-radius:8px; font-size:12px; }
+  .ok { color:#34d399; font-size:13px; padding:6px 0; }
+  .err { color:#f87171; }
+  footer { margin-top:30px; text-align:center; color:#64748b; font-size:12px; }
+</style></head>
+<body><div class="wrap">
+  <h1>🔒 Inspección de Token en Memoria — KRA-1527</h1>
+  <div class="sub">Pentesting 2026 · 5.2.1 Insecure Storage of Authentication Token in Agent Memory</div>
+
+  <div class="hero">
+    <div class="big">FAIL</div>
+    <div class="lbl">TOKEN EXPUESTO — la corrección NO cumple</div>
+    <div class="counts">
+      <span class="count" style="background:#DC262622;color:#DC2626">FAIL: 1</span>
+      <span class="count" style="background:#D9770622;color:#D97706">WARN: 0</span>
+      <span class="count" style="background:#05966922;color:#059669">PASS: 1</span>
+    </div>
+  </div>
+
+  <table class="meta-t"><tr><td>Fecha de análisis</td><td>2026-09-01 14:53:48</td></tr><tr><td>Caso de prueba</td><td>CP01 - Imprimir recibo</td></tr><tr><td>Proceso analizado</td><td>Hermes2Agent</td></tr><tr><td>Objetivo escaneado</td><td>/tmp/dmptest</td></tr><tr><td>Archivos .DMP analizados</td><td>2</td></tr></table>
+
+  
+        <div class="card" style="border-left:6px solid #DC2626">
+          <div class="card-head">
+            <span class="badge" style="background:#DC2626">FAIL</span>
+            <span class="fname" title="/tmp/dmptest/Hermes2Agent (2).DMP">Hermes2Agent (2).DMP</span>
+          </div>
+          <div class='meta'>Tamaño: <b>2.2 KB</b> · JWTs completos: <b>1</b> · JWTs de auth: <b style='color:#DC2626'>1</b> · Fragmentos eyJ: <b>0</b></div><div class='kw'>Palabras clave: authorization (1), Bearer  (1), Authorization: (1)</div><div class='jwt fail'><div class='jwt-h'>🔴 JWT de autenticación detectado (428 bytes)</div><div class='mono'>eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwi...v9fwSQM4more</div><div class='claims'>Usuario: <b>igagent005</b> · claims: azp, exp, iat, iss, preferred_username, sub, typ<br>iat: 2026-08-13 18:55:52 UTC · exp: 2026-08-14 04:55:48 UTC</div></div>
+        </div>
+        <div class="card" style="border-left:6px solid #059669">
+          <div class="card-head">
+            <span class="badge" style="background:#059669">PASS</span>
+            <span class="fname" title="/tmp/dmptest/HttpProxy.DMP">HttpProxy.DMP</span>
+          </div>
+          <div class='meta'>Tamaño: <b>6.0 KB</b> · JWTs completos: <b>0</b> · JWTs de auth: <b style='color:#059669'>0</b> · Fragmentos eyJ: <b>0</b></div><div class='ok'>✅ No se encontró ningún token de autenticación en texto plano.</div>
+        </div>
+
+  <footer>Generado por dump_token_inspector.py · 2026-09-01 14:53:48<br>
+  Criterio: FAIL si se detecta un JWT de autenticación completo y decodificable en el volcado.</footer>
+</div></body></html>

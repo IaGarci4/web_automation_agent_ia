@@ -1,4 +1,69 @@
 {
+  "valida direcciones": {
+    "test": "test_valida_direccion_loop",
+    "exitos": 1,
+    "ultima_vez": "2026-09-19 12:30"
+  },
+  "valida direcciones cliente": {
+    "test": "test_valida_direccion_loop",
+    "exitos": 1,
+    "ultima_vez": "2026-09-19 12:30"
+  },
+  "validacion direccion loop": {
+    "test": "test_valida_direccion_loop",
+    "exitos": 1,
+    "ultima_vez": "2026-09-19 12:30"
+  },
+  "reproduce banco direcciones": {
+    "test": "test_reproduce_direccion_bank",
+    "exitos": 1,
+    "ultima_vez": "2026-09-19 12:30"
+  },
+  "valida banco direcciones": {
+    "test": "test_reproduce_direccion_bank",
+    "exitos": 1,
+    "ultima_vez": "2026-09-19 12:30"
+  },
+  "corre kra 1526": {
+    "test": "test_CP01_busqueda_global_propios",
+    "exitos": 1,
+    "ultima_vez": "2026-09-21 00:00"
+  },
+  "prueba idor iduser idagent": {
+    "test": "test_CP01_busqueda_global_propios",
+    "exitos": 1,
+    "ultima_vez": "2026-09-21 00:00"
+  },
+  "autorizacion busqueda global kra 1526": {
+    "test": "test_CP01_busqueda_global_propios",
+    "exitos": 1,
+    "ultima_vez": "2026-09-21 00:00"
+  },
+  "corre kra 1526 multiagente": {
+    "test": "test_CP08_multi_iduser_ajeno",
+    "exitos": 1,
+    "ultima_vez": "2026-09-22 00:00"
+  },
+  "prueba idor multiagente agencia 0040": {
+    "test": "test_CP08_multi_iduser_ajeno",
+    "exitos": 1,
+    "ultima_vez": "2026-09-22 00:00"
+  },
+  "audita direcciones": {
+    "test": "test_auditar_validacion",
+    "exitos": 1,
+    "ultima_vez": "2026-09-19 00:00"
+  },
+  "auditoria validador direcciones devtools": {
+    "test": "test_auditar_validacion",
+    "exitos": 1,
+    "ultima_vez": "2026-09-19 00:00"
+  },
+  "como valida hermes la direccion": {
+    "test": "test_auditar_validacion",
+    "exitos": 1,
+    "ultima_vez": "2026-09-19 00:00"
+  },
   "manda transfer envio banorte": {
     "test": "test_envio_normal_banorte",
     "exitos": 1,
@@ -68,5 +133,15 @@
     "test": "test_envio_normal_banorte",
     "exitos": 1,
     "ultima_vez": "2026-08-04 10:29"
+  },
+  "envio transfer random elektra": {
+    "test": "test_envio_normal_elektra",
+    "exitos": 1,
+    "ultima_vez": "2026-09-22 18:00"
+  },
+  "has envio transfer elektra random": {
+    "test": "test_envio_normal_elektra",
+    "exitos": 1,
+    "ultima_vez": "2026-09-23 12:15"
   }
 }

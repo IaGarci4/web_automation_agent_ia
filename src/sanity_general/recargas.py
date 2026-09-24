@@ -80,16 +80,18 @@ async def _dismiss_modal(flow):
     page = flow.page
     try:
         deny = page.get_by_test_id(MODAL_DENY_BTN).first
-        if await deny.is_visible(timeout=5_000):
-            for intento in range(1, 4):
-                await deny.click(force=True)
-                try:
-                    await deny.wait_for(state="hidden", timeout=2_000)
-                    break
-                except Exception:
-                    if intento == 3:
-                        logger.warning("[Recargas] El modal no cerró tras 3 intentos.")
-            await page.wait_for_timeout(1_500)
+        # `is_visible()` NO acepta timeout: lo pasábamos y el TypeError hacía
+        # que el modal nunca se cerrara. Se espera con wait_for.
+        await deny.wait_for(state="visible", timeout=4_000)
+        for intento in range(1, 4):
+            await deny.click(force=True)
+            try:
+                await deny.wait_for(state="hidden", timeout=2_000)
+                break
+            except Exception:
+                if intento == 3:
+                    logger.warning("[Recargas] El modal no cerró tras 3 intentos.")
+        await page.wait_for_timeout(1_000)
     except Exception:
         pass
 

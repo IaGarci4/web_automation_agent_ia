@@ -29,7 +29,23 @@ con Python + Playwright + pytest. Conoces TODO el proyecto:
     Edited Checks (motivo 'Other').
   • CP09 — Pagos en Línea: en Chronos depósito + otro cargo + validación
     del balance del agente (Collection), y en Hermes el pago en línea.
-  (Pendientes: CP10-CP22, y los Hold de Chronos de CP01-CP04.)
+  • CP10 — Ficha de Depósitos (Deposit Slip): dos pruebas — happy path (foto
+    con cámara simulada + monto + envío) y caso alternativo (zoom 300%/100%,
+    limpiar formulario, borrar y retomar la foto). Ambas cierran borrando el
+    recibo en Chronos > Collection > Digital Deposit Receipt.
+  • CP11 — Fax de entrada y salida (multi-agencia): valida el FAX de la agencia
+    en Chronos (Agents > Agent), hace un envío HOME DELIVERY a Filipinas,
+    dispara 'Send Fax' desde Reportes, confirma el registro en Chronos
+    (Processing > Fax Assignment) y cancela la transacción.
+  • CP12 — Reportes de Balance: dos pruebas — Balance Continuo (tarjetas del
+    resultado, menú de opciones, visor de PDF y DESCARGA del PDF con validación
+    de su contenido) y Balance por Cajero (estado vacío y búsqueda). Los pasos
+    de impresión quedan fuera: el proceso automatizado no usa impresora.
+  • CP22 — Money Order con Información Adicional: configura la impresora de MO,
+    genera un money order de $3,000 (el sistema lo divide en 3), llena el
+    compliance con FOTO del ID, lo IMPRIME y anula los 3 desde Reportes.
+    Su módulo lo reutiliza la etiqueta KRA-1527 para auditar al Hardware Agent.
+  (Pendientes: CP14-CP22, y los Hold de Chronos de CP01-CP04.)
 - ETIQUETAS de deploy (validaciones que liberan a producción): p.ej. KRA-1125
   (Validation Rule del teléfono 573 para Uniteller Colombia en Depósito).
 - ENVÍOS por pagador (data-driven): catálogo src/pagadores/<pais>/payers.json
@@ -43,6 +59,17 @@ con Python + Playwright + pytest. Conoces TODO el proyecto:
 - Errores de impresora en Bill Payment (Cancel), confirmación "YES, Cancel".
 - Multi-agente: login + selección de agencia (con re-selección tras cada
   transacción y confirmación PC).
+
+## Integración con QMetry (Test Management for Jira)
+- Las capturas del sanity se suben al Test Cycle correspondiente, INCRUSTADAS en
+  el campo 'Actual Result' del paso (como si se pegaran a mano).
+- El paso destino sale del nombre del archivo (Step02-nombre.png), de la regla de
+  cancelación (siempre al último paso) o de config/qmetry_mapeo.json.
+- Con QMETRY_RESULTADO=1 escribe además el resultado: Pass en los pasos con
+  evidencia, Fail en el paso donde se detuvo la prueba, NA en los no ejecutados.
+- Comandos: `$env:QMETRY_UPLOAD="1"` antes de pytest, `python tools/qmetry_subir.py CP01`
+  para subir de una corrida previa, y `python tools/ver_evidencias.py CP01` para
+  revisar el reparto sin tocar QMetry.
 
 ## Evidencias
 - Cada test guarda capturas numeradas NN_descriptor.png en

@@ -91,7 +91,7 @@ async def test_CP01_money_transfer_cash_kyc(logged_page: Page, language, width, 
     logger.info("[CP01] Cliente del envío: %s", cliente)
 
     # Evidencia con marcado: nombres del beneficiario
-    await evi.shot("cliente_beneficiario", locators=[
+    await evi.shot("cliente_beneficiario", paso=1, locators=[
         logged_page.get_by_test_id("transfer-beneficiary-name-0-dropdown-input"),
         logged_page.get_by_test_id("transfer-beneficiary-first-lastname-0-input"),
         logged_page.get_by_test_id("transfer-beneficiary-second-lastname-0-input"),
@@ -100,7 +100,7 @@ async def test_CP01_money_transfer_cash_kyc(logged_page: Page, language, width, 
     await F.seleccionar_pagador(flow, cfg, logger, tipo=TIPO_ENVIO)
 
     # Evidencia con marcado: monto del envío
-    await evi.shot("cash_monto_pagador", locators=[
+    await evi.shot("cash_monto_pagador", paso=2, locators=[
         logged_page.get_by_test_id("transfer-payers-money-info-amount-0-cash-amount-input")])
     logger.info("[CP01] Steps 2–3 OK (formulario principal + pagador).")
 
@@ -119,7 +119,7 @@ async def test_CP01_money_transfer_cash_kyc(logged_page: Page, language, width, 
         exp=IA_EXP, dob=IA_DOB, tipo=TIPO_ENVIO)
 
     # Evidencia con marcado: campos de identificación (país + número de ID)
-    await evi.shot("info_adicional", locators=[
+    await evi.shot("info_adicional", paso=3, locators=[
         logged_page.get_by_test_id(IA.INPUT_PAIS),
         logged_page.get_by_test_id(IA.INPUT_NUM_ID),
     ])

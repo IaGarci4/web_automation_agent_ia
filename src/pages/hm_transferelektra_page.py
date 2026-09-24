@@ -9,6 +9,7 @@ PATRON: Los métodos aceptan los valores como parámetros.
         Las constantes se definen en el test/flujo, no aquí.
 """
 
+import asyncio
 import re
 
 from config.logger import get_logger
@@ -120,6 +121,86 @@ class HmTransferelektraPage(BasePage):
         await self.handle_notifications_modal()
         await self.wait_for_no_blocking_overlays()
 
+    # ── SOPORTE REMOTO (Hermes2Agent) ───────────────────────
+    # Toggle del dropdown de soporte remoto: no tiene testid, pero su SVG tiene
+    # un path único → lo ubicamos por ese path (robusto a cambios de idioma).
+    _SOPORTE_TOGGLE_CSS = 'svg-dropdown:has(path[d^="M 21.379 2.7158"])'
+    _SOPORTE_ITEM_TESTID = "remoteSupport-0-navbar-dropdown-item"
+    _SOPORTE_INPUT_TESTID = "input-field-input"
+
+    async def aplicar_soporte_remoto(self, token: str) -> bool:
+        """Aplica el token de Soporte Remoto en el Hermes2Agent.
+
+        Pasos (la UI se ve oscura pero los elementos responden):
+          1. Abrir el dropdown de soporte remoto (icono SVG del navbar).
+          2. Clic en la opción 'Soporte Remoto' / 'Remote Support'.
+          3. Teclear el token consultado en BD (input maxlength 10).
+          4. Clic en 'Continuar' / 'Continue' (botón habilitado).
+        Devuelve True si completó los pasos. Reutiliza el POM (smart_click)."""
+        import re as _re
+        logger.info("aplicar_soporte_remoto: token=%s", token)
+        if not token:
+            logger.warning("aplicar_soporte_remoto: token vacío — nada que aplicar.")
+            return False
+
+        item = self.page.get_by_test_id(self._SOPORTE_ITEM_TESTID).first
+
+        async def _item_visible() -> bool:
+            try:
+                return await item.is_visible()
+            except Exception:
+                return False
+
+        # 1) Abrir el dropdown hasta que la OPCIÓN sea visible (no basta clicar).
+        if not await _item_visible():
+            # a) Por el path único del SVG del toggle.
+            try:
+                await self.page.locator(self._SOPORTE_TOGGLE_CSS).first.click(timeout=5_000)
+            except Exception:
+                pass
+            # b) Si no apareció, recorrer los svg-dropdown del navbar uno por uno.
+            if not await _item_visible():
+                try:
+                    drops = self.page.locator("svg-dropdown")
+                    for i in range(min(await drops.count(), 10)):
+                        try:
+                            await drops.nth(i).click(force=True, timeout=2_000)
+                        except Exception:
+                            continue
+                        await self.page.wait_for_timeout(400)
+                        if await _item_visible():
+                            break
+                except Exception:
+                    pass
+            # Esperar a que termine de desplegarse.
+            for _ in range(8):
+                if await _item_visible():
+                    break
+                await self.page.wait_for_timeout(300)
+
+        if not await _item_visible():
+            logger.warning("aplicar_soporte_remoto: la opción 'Soporte Remoto' no se "
+                           "hizo visible tras abrir el dropdown.")
+
+        # 2) Clic en la opción (por testid; fallback por TEXTO ES/EN, sin selectores
+        #    amplios que puedan matchear otro item).
+        await self.smart_click(
+            testid=self._SOPORTE_ITEM_TESTID,
+            texto=_re.compile(r"soporte\s*remoto|remote\s*support", _re.I))
+        await self.page.wait_for_timeout(600)
+
+        # 3) Teclear el token en el input.
+        await self.fill_input_by_testid(self._SOPORTE_INPUT_TESTID, token)
+
+        # 4) Continuar (botón genérico test-id-button → desambiguar por texto).
+        await self.smart_click(
+            testid="test-id-button",
+            texto=_re.compile(r"continuar|continue", _re.I),
+            fallbacks=['[data-testid="test-id-button"]'])
+        await self.wait_for_no_blocking_overlays()
+        logger.info("aplicar_soporte_remoto: ✓ token aplicado y 'Continuar' pulsado.")
+        return True
+
     # ── TRANSFERS ───────────────────────────────────────────
 
     async def fill_transfer_customer_cellphone_0_cellphone_input(self, transfer_customer_cellphone_0_cellphone_input: str) -> None:
@@ -165,6 +246,454 @@ class HmTransferelektraPage(BasePage):
         await self.fill_input_by_testid(
             HmTransferelektraLocators.TRANSFER_CUSTOMER_ADDRESS_0_INPUT, transfer_customer_address_0_input
         )
+
+    # Directional/tipo de vía → token canónico, para comparar calles «idénticas»
+    # aunque cambie el orden o la abreviatura ('AVE E' == 'E AVE', 'ST'=='STREET').
+    _DIR_CANON = {
+        "N": "N", "NORTH": "N", "S": "S", "SOUTH": "S", "E": "E", "EAST": "E",
+        "W": "W", "WEST": "W", "NE": "NE", "NW": "NW", "SE": "SE", "SW": "SW",
+        "ST": "ST", "STREET": "ST", "AVE": "AVE", "AV": "AVE", "AVENUE": "AVE",
+        "BLVD": "BLVD", "BOULEVARD": "BLVD", "RD": "RD", "ROAD": "RD",
+        "DR": "DR", "DRIVE": "DR", "LN": "LN", "LANE": "LN", "CT": "CT",
+        "COURT": "CT", "PL": "PL", "PLACE": "PL", "SQ": "SQ", "SQUARE": "SQ",
+        "PKWY": "PKWY", "PARKWAY": "PKWY", "HWY": "HWY", "HIGHWAY": "HWY",
+        "LOOP": "LOOP", "WAY": "WAY", "TER": "TER", "TERRACE": "TER",
+    }
+
+    def _tokens_calle(self, texto: str) -> set:
+        """Conjunto de tokens canónicos de una calle (sin puntuación, sin orden).
+
+        Así '601 LAKESIDE AVE E' y '601 LAKESIDE E AVE' dan el MISMO conjunto:
+        {601, LAKESIDE, E, AVE}. Es lo que exige el usuario — que la elegida sea
+        idéntica a la escrita, no que «sobre una E»."""
+        bruto = re.sub(r"[^A-Za-z0-9 ]", " ", (texto or "").upper())
+        out = set()
+        for tok in bruto.split():
+            out.add(self._DIR_CANON.get(tok, tok))
+        return out
+
+    async def _direccion_en_error(self) -> bool:
+        """True si el campo de dirección quedó INVÁLIDO y bloquea Continuar.
+
+        Señal precisa (código del front, Big C 2026-09-22): el input toma la clase
+        `invalid-error-input` y se pinta el nodo `transfer-customer-address-0-error`
+        cuando `address` tiene el error `isAddressNotValidated`. Respaldo textual
+        por si cambia el DOM."""
+        try:
+            inp = self.page.get_by_test_id(
+                HmTransferelektraLocators.TRANSFER_CUSTOMER_ADDRESS_0_INPUT).first
+            if "invalid-error-input" in ((await inp.get_attribute("class")) or ""):
+                return True
+        except Exception:
+            pass
+        try:
+            err = self.page.locator(
+                '[data-testid="transfer-customer-address-0-error"]').first
+            if await err.count() and await err.is_visible():
+                return True
+        except Exception:
+            pass
+        try:
+            loc = self.page.get_by_text(re.compile(
+                r"no\s*(ha\s*sido\s*)?verificad|no\s*ha\s*sido\s*validad|"
+                r"selecciona una direcci|not\s*verified|p\.?o\.?\s*box|faltan datos",
+                re.I))
+            for i in range(min(await loc.count(), 6)):
+                if await loc.nth(i).is_visible():
+                    return True
+        except Exception:
+            pass
+        return False
+
+    async def sugerencias_direccion_por_red(self, texto: str,
+                                            espera_ms: int = 1_500) -> list:
+        """TECLEA la dirección y captura la respuesta del endpoint `suggestions`.
+
+        El panel de sugerencias NO es PrimeNG ni Google Places: es un overlay
+        propio (provider 'postgrid') que los selectores DOM no acertaban. Pero la
+        data llega LIMPIA por la red:
+
+            {status, message, data:[{id, mainText, secondaryText, provider}, …]}
+
+        con `mainText`='CALLE' y `secondaryText`='CIUDAD ZIP'. Leer la red es
+        exacto y no depende del DOM. El autocomplete se dispara con pulsaciones
+        reales (`.fill()` no lo dispara), así que aquí se teclea de verdad.
+
+        Devuelve la ÚLTIMA lista `data` capturada (la del texto completo)."""
+        inp = self.page.get_by_test_id(
+            HmTransferelektraLocators.TRANSFER_CUSTOMER_ADDRESS_0_INPUT).first
+        capturas = []
+
+        async def _guardar(resp):
+            try:
+                body = await resp.json()
+            except Exception:
+                return
+            if isinstance(body, dict) and isinstance(body.get("data"), list):
+                capturas.append(body["data"])
+
+        def _on(resp):
+            try:
+                if "suggestions" in resp.url.lower():
+                    asyncio.ensure_future(_guardar(resp))
+            except Exception:
+                pass
+
+        self.page.on("response", _on)
+        try:
+            try:
+                await inp.click(timeout=3_000)
+            except Exception:
+                try:
+                    await inp.click(force=True, timeout=3_000)
+                except Exception:
+                    pass
+            try:
+                await inp.fill("")
+            except Exception:
+                pass
+            if texto:
+                try:
+                    await inp.press_sequentially(texto, delay=60)
+                except Exception:
+                    try:
+                        await inp.type(texto, delay=60)
+                    except Exception:
+                        pass
+            await self.page.wait_for_timeout(espera_ms)
+        finally:
+            try:
+                self.page.remove_listener("response", _on)
+            except Exception:
+                pass
+        return capturas[-1] if capturas else []
+
+    async def seleccionar_direccion_sugerida_cliente(
+            self, direccion_escrita: str = "", zip_esperado: str = "",
+            ciudad_esperada: str = "", timeout: int = 3_500) -> tuple:
+        """Resuelve el validador de direcciones REALES del cliente leyendo la RED.
+
+        Se teclea la dirección, se captura la respuesta del endpoint
+        `suggestions` y se ELIGE la sugerencia que casa con el ZIP autoritativo
+        (Hermes autocompletó City/State desde él) — NO la primera, que suele ser
+        una calle homónima de otra ciudad. La fila se clica por su `mainText`
+        (el overlay no expone un selector estable).
+
+        Devuelve `(ok, estado)`:
+          'OK'            eligió una sugerencia que casa con el ZIP → verificada.
+          'SIN_PANEL_OK'  no hubo sugerencias y el campo NO está en error.
+          'INVALIDO'      no hubo sugerencias pero el campo exige una válida.
+          'NO_MATCH'      hubo sugerencias pero ninguna casa con el ZIP/ciudad.
+        """
+        data = await self.sugerencias_direccion_por_red(direccion_escrita)
+        if not data:
+            if await self._direccion_en_error():
+                logger.warning("Dirección '%s' (%s): sin sugerencias y el campo "
+                               "exige una válida.", direccion_escrita, zip_esperado)
+                return (False, "INVALIDO")
+            logger.info("Dirección '%s': sin sugerencias y sin error — se acepta "
+                        "tal cual.", direccion_escrita)
+            return (True, "SIN_PANEL_OK")
+
+        zp = (zip_esperado or "").strip()
+        cd = (ciudad_esperada or "").strip().upper()
+
+        def _sec(it):
+            return (it.get("secondaryText") or "").upper()
+
+        def _numero_primero(it):
+            return bool(re.match(r"^\s*\d", it.get("mainText") or ""))
+
+        objetivo = None
+        if zp:
+            objetivo = next((it for it in data
+                             if zp in _sec(it) and _numero_primero(it)), None)
+        if objetivo is None and cd:
+            objetivo = next((it for it in data
+                             if cd in _sec(it) and _numero_primero(it)), None)
+        # RESPALDO: si ninguna casa con el zip/ciudad, se elige la PRIMERA
+        # sugerencia real (formato número+calle). El validador valida la
+        # dirección; al elegir una real, Hermes actualiza ciudad/estado/zip de
+        # forma coherente y el envío continúa. Así el flujo NUNCA se atora por
+        # esta validación, aunque el zip tecleado no traiga match propio.
+        if objetivo is None:
+            objetivo = next((it for it in data if _numero_primero(it)), None)
+
+        if objetivo is None:
+            ofrecidas = " | ".join(
+                f'{it.get("mainText","")} [{it.get("secondaryText","")}]'
+                for it in data)[:240]
+            logger.warning("Dirección '%s' (%s): sin sugerencias con formato "
+                           "número+calle. Ofrecidas: %s", direccion_escrita, zp,
+                           ofrecidas)
+            try:
+                await self.page.keyboard.press("Escape")
+            except Exception:
+                pass
+            return (False, "NO_MATCH")
+
+        _match_zip = zp and zp in _sec(objetivo)
+        if not _match_zip:
+            logger.info("Dirección: sin match de zip '%s'; se elige una real "
+                        "cualquiera → '%s [%s]' (Hermes ajusta zip/ciudad).",
+                        zp, objetivo.get("mainText"), objetivo.get("secondaryText"))
+
+        main = (objetivo.get("mainText") or "").strip()
+        sec = (objetivo.get("secondaryText") or "").strip()
+        # Refuerzo de identidad (log): la calle escrita debería estar contenida
+        # en la elegida (mismo conjunto de tokens). El ZIP ya mandó.
+        escr = self._tokens_calle(direccion_escrita)
+        if escr and not escr.issubset(self._tokens_calle(main)):
+            logger.warning("Dirección: casa ZIP pero la calle difiere ('%s' vs "
+                           "sugerencia '%s').", direccion_escrita, main)
+        # Clic en la fila por su texto visible (mainText).
+        fila = self.page.get_by_text(main, exact=False).first
+        clicado = False
+        try:
+            await fila.scroll_into_view_if_needed(timeout=1_500)
+        except Exception:
+            pass
+        try:
+            await fila.click(timeout=4_000)
+            clicado = True
+        except Exception:
+            try:
+                await fila.click(force=True, timeout=3_000)
+                clicado = True
+            except Exception:
+                clicado = False
+        if not clicado:
+            logger.warning("Dirección: no pude clicar la sugerencia '%s'.", main)
+            return (False, "NO_MATCH")
+        await self.page.wait_for_timeout(600)
+        if await self._direccion_en_error():
+            logger.warning("Dirección: tras elegir '%s [%s]' el campo sigue en "
+                           "error.", main, sec)
+            return (False, "NO_MATCH")
+        logger.info("Dirección: ✓ elegida por ZIP '%s' → '%s [%s]'", zp, main, sec)
+        return (True, "OK")
+
+    _ADDR_SUGGESTION_TESTID = "transfer-customer-address-suggestion-0"
+
+    def _elegir_sugerencia(self, data, zip_preferido):
+        """(idx, item) de la sugerencia número+calle que casa con el ZIP; si no,
+        la primera número+calle. (None, None) si no hay ninguna útil."""
+        def _numini(it):
+            return bool(re.match(r"^\s*\d", it.get("mainText") or ""))
+        idx = None
+        if zip_preferido:
+            for k, it in enumerate(data):
+                if _numini(it) and zip_preferido in (it.get("secondaryText") or ""):
+                    idx = k
+                    break
+        if idx is None:
+            for k, it in enumerate(data):
+                if _numini(it):
+                    idx = k
+                    break
+        return (idx, data[idx]) if idx is not None else (None, None)
+
+    async def _click_sugerencia(self, idx, texto_main):
+        """Clic en la fila de sugerencia (todas comparten el mismo testid → .nth)."""
+        try:
+            filas = self.page.get_by_test_id(self._ADDR_SUGGESTION_TESTID)
+            n = await filas.count()
+            if n:
+                fila = filas.nth(idx if 0 <= idx < n else 0)
+                try:
+                    await fila.scroll_into_view_if_needed(timeout=1_500)
+                except Exception:
+                    pass
+                await fila.click(timeout=4_000)
+                return True
+        except Exception:
+            pass
+        try:
+            await self.page.get_by_text(texto_main, exact=False).first.click(timeout=4_000)
+            return True
+        except Exception:
+            return False
+
+    def _escuchar_verificacion(self):
+        """Listener de /address/verification → guarda el status. Devuelve (estado, on)."""
+        estado = {"status": None, "recibido": False}
+
+        async def _grab(resp):
+            try:
+                b = await resp.json()
+            except Exception:
+                return
+            d = b.get("data") if (isinstance(b, dict)
+                                  and isinstance(b.get("data"), dict)) else b
+            if isinstance(d, dict) and d.get("status") is not None:
+                estado["status"] = str(d.get("status"))
+                estado["recibido"] = True
+
+        def _on(resp):
+            try:
+                if "address/verification" in resp.url.lower():
+                    asyncio.ensure_future(_grab(resp))
+            except Exception:
+                pass
+
+        self.page.on("response", _on)
+        return estado, _on
+
+    async def _asegurar_zip_direccion(self, zip_val: str) -> None:
+        """Tras verificar la dirección, garantiza que el ZIP del cliente quede
+        poblado (normalmente lo llena el front desde la verificación; si quedó
+        vacío, lo ponemos). Al setear el ZIP, el front autocompleta ciudad/estado
+        y NO re-invalida la dirección (confirmado por Big C 2026-09-22)."""
+        if not zip_val:
+            return
+        try:
+            zi = self.page.get_by_test_id(
+                HmTransferelektraLocators.TRANSFER_CUSTOMER_ZIP_CODE_0_INPUT).first
+            if ((await zi.input_value()) or "").strip():
+                return
+            await self.fill_transfer_customer_zip_code_0_input(zip_val)
+            try:
+                await self.esperar_autocomplete_cp()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    async def resolver_direccion_cliente(self, semilla_calle: str,
+                                         zip_preferido: str = "",
+                                         ciudad: str = "", estado: str = "",
+                                         intentos: int = 2) -> tuple:
+        """HÍBRIDO (real + fallback determinista). Confirmado con el front (Big C
+        2026-09-22): la dirección solo queda válida al SELECCIONAR una sugerencia y
+        que POST /address/verification devuelva status != 'failed' → el front pone
+        isAddressValidated=true, rellena ciudad/estado/ZIP y desbloquea Continuar.
+
+        1) FLUJO REAL (con `intentos`): teclear (≥6) → elegir sugerencia → esperar
+           /address/verification. No se re-teclea ni se toca el ZIP (re-invalida).
+        2) FALLBACK: si PostGrid no verifica, se INTERCEPTA /address/verification
+           (y /address/suggestions) con page.route devolviendo 'verified', para que
+           la validación NUNCA detenga el flujo.
+        Devuelve (ok, {'direccion','zip','ciudad','modo'}, sugerencias)."""
+        data_final = []
+        for intento in range(1, max(1, intentos) + 1):
+            data = await self.sugerencias_direccion_por_red(semilla_calle)
+            if data:
+                data_final = data
+                idx, elegido = self._elegir_sugerencia(data, zip_preferido)
+                if elegido is not None:
+                    sec = elegido.get("secondaryText") or ""
+                    main = elegido.get("mainText") or ""
+                    m = re.search(r"\b(\d{5})\b", sec)
+                    zsel = m.group(1) if m else (zip_preferido or "")
+                    cd = (sec.replace(zsel, "").strip(" ,").upper() if zsel else sec.upper())
+                    estado_v, _on = self._escuchar_verificacion()
+                    try:
+                        if await self._click_sugerencia(idx, main):
+                            ok = False
+                            for _i in range(8):
+                                if (estado_v["status"] or "").lower() == "failed":
+                                    break
+                                if not await self._direccion_en_error() and (
+                                        estado_v["recibido"] or _i >= 2):
+                                    ok = True
+                                    break
+                                await self.page.wait_for_timeout(300)
+                            if ok:
+                                await self._asegurar_zip_direccion(zsel)
+                                logger.info("Dirección: ✓ '%s' [%s %s] verificada "
+                                            "(flujo real).", main, cd, zsel)
+                                return (True, {"direccion": main, "zip": zsel,
+                                               "ciudad": cd, "modo": "real"}, data)
+                    finally:
+                        try:
+                            self.page.remove_listener("response", _on)
+                        except Exception:
+                            pass
+            logger.info("Dirección '%s': intento real %d/%d no verificó%s.",
+                        semilla_calle, intento, max(1, intentos),
+                        " — voy al intercept" if intento >= intentos else ", reintento")
+            try:
+                await self.page.keyboard.press("Escape")
+            except Exception:
+                pass
+
+        info = await self._resolver_por_intercept(
+            semilla_calle, zip_preferido, ciudad, estado, data_final)
+        await self._asegurar_zip_direccion(info.get("zip"))
+        ok = not await self._direccion_en_error()
+        info["modo"] = "intercept"
+        (logger.info if ok else logger.warning)(
+            "Dirección: %s vía intercept → '%s [%s %s]'.",
+            "✓ verificada" if ok else "⚠ siguió en error",
+            info.get("direccion"), info.get("ciudad"), info.get("zip"))
+        return (ok, info, data_final)
+
+    async def _resolver_por_intercept(self, calle: str, zip_pref: str,
+                                      ciudad: str, estado: str, data: list) -> dict:
+        """Fallback 100% determinista: intercepta /address/suggestions y
+        /address/verification con page.route y responde 'verified' con datos
+        coherentes, así el front marca isAddressValidated=true pase lo que pase."""
+        import json as _json
+        zsel = (zip_pref or "").strip()
+        cd = (ciudad or "").strip().upper()
+        st = (estado or "").strip().upper()
+        if (not zsel or not cd) and data:
+            it = next((x for x in data
+                       if re.match(r"^\s*\d", x.get("mainText") or "")), data[0])
+            sec = it.get("secondaryText") or ""
+            m = re.search(r"\b(\d{5})\b", sec)
+            if not zsel and m:
+                zsel = m.group(1)
+            if not cd:
+                cd = sec.replace(zsel, "").strip(" ,").upper()
+            if not calle.strip():
+                calle = it.get("mainText") or calle
+        sug = _json.dumps({"status": 200, "message": "ok", "data": [
+            {"id": "auto-0", "mainText": calle,
+             "secondaryText": f"{cd} {zsel}".strip(), "provider": "postgrid"}]})
+        # La verificación real viaja bajo `data:{...}` (como /suggestions); el
+        # front lee address/city/state/zipCode de ahí. Si no se anida, marca
+        # verificado pero deja ZIP/Ciudad/Estado vacíos (y el ZIP es requerido).
+        ver = _json.dumps({"status": 200, "message": "ok", "data": {
+            "provider": "postgrid", "status": "verified", "id": "auto-0",
+            "address": calle, "city": cd, "state": st,
+            "country": "US", "zipCode": zsel, "errors": []}})
+
+        async def _r_sug(route):
+            try:
+                await route.fulfill(status=200, content_type="application/json", body=sug)
+            except Exception:
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
+
+        async def _r_ver(route):
+            try:
+                await route.fulfill(status=200, content_type="application/json", body=ver)
+            except Exception:
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
+
+        await self.page.route("**/address/suggestions", _r_sug)
+        await self.page.route("**/address/verification", _r_ver)
+        try:
+            await self.sugerencias_direccion_por_red(calle, espera_ms=800)
+            await self._click_sugerencia(0, calle)
+            for _ in range(7):
+                if not await self._direccion_en_error():
+                    break
+                await self.page.wait_for_timeout(300)
+        finally:
+            for pat, fn in (("**/address/suggestions", _r_sug),
+                            ("**/address/verification", _r_ver)):
+                try:
+                    await self.page.unroute(pat, fn)
+                except Exception:
+                    pass
+        return {"direccion": calle, "zip": zsel, "ciudad": cd}
 
     async def fill_transfer_customer_zip_code_0_input(self, transfer_customer_zip_code_0_input: str) -> None:
         """Ingresa texto en: transfer-customer-zip-code-0-input"""
@@ -347,9 +876,24 @@ class HmTransferelektraPage(BasePage):
         logger.info("click_mexico_regular...")
         sel = self.format_testid_selector(
             HmTransferelektraLocators.TRANSFER_PAYERS_MONEY_INFO_FEE_TYPE_0_CASH_DROPDOWN_INPUT_click)
+        # Si el fee-type YA viene con valor (p-inputwrapper-filled) —caso del
+        # agente/WebView2, donde suele auto-seleccionarse y quedar oculto— no hay
+        # que abrir el dropdown: se omite la selección y se sigue al monto.
+        try:
+            cls = (await self.page.locator(sel).first.get_attribute("class")) or ""
+            if "p-inputwrapper-filled" in cls:
+                logger.info("click_mexico_regular: fee-type ya trae valor (filled) "
+                            "— se omite la selección.")
+                return
+        except Exception:
+            pass
         ultimo_error = None
         for intento in range(1, 4):
             try:
+                try:
+                    await self.page.locator(sel).first.scroll_into_view_if_needed(timeout=1_500)
+                except Exception:
+                    pass
                 await self.select_option_by_text(
                     sel, "li[role='option'], .p-dropdown-item", "MEXICO REGULAR")
                 return
@@ -747,18 +1291,70 @@ class HmTransferelektraPage(BasePage):
         smart_click cuando el botón ya está listo. Si falla, cae a smart_click
         (robusto, con sus fallbacks)."""
         logger.info("click_continue...")
-        # Ruta rápida: si el botón YA está listo, se clickea de inmediato sin
-        # gastar los 2.5 s completos esperando overlays no bloqueantes. Solo si
-        # el click directo falla se espera a los overlays y se usa smart_click.
+        # Estrategia del repo original, que aquí SÍ funciona: esperar a que el
+        # botón sea visible y clickear con **force=True**.
+        #
+        # El matiz que costó entender: `force=True` se salta DOS verificaciones,
+        # y solo una de ellas nos interesa.
+        #   • "recibe eventos de puntero": en esta pantalla hay overlays no
+        #     bloqueantes que la hacen fallar. Sin force, el click agota su
+        #     timeout, se reintenta, y de ahí el scroll una y otra vez.
+        #   • "está habilitado": esta sí importa — clickear a la fuerza un botón
+        #     deshabilitado parece funcionar y Angular lo ignora en silencio.
+        # Por eso se comprueba 'habilitado' A MANO y se clickea con force.
+        loc = self.page.get_by_test_id(
+            HmTransferelektraLocators.TRANSFER_CONTINUE_BUTTON_0_BUTTON)
+        espera, limite = 0, 15_000
+        scrolleado = False
+        while espera <= limite:
+            try:
+                total = min(await loc.count(), 8)
+            except Exception:
+                total = 0
+            for i in range(total):
+                btn = loc.nth(i)
+                try:
+                    if not (await btn.is_visible() and await btn.is_enabled()):
+                        continue
+                    if not scrolleado:
+                        try:
+                            await btn.scroll_into_view_if_needed(timeout=1_000)
+                        except Exception:
+                            pass
+                        scrolleado = True
+                    await btn.click(timeout=4_000, force=True)
+                    logger.info("✓ click_continue (habilitado a los %.1f s)",
+                                espera / 1000)
+                    return
+                except Exception:
+                    continue
+            await self.page.wait_for_timeout(150)
+            espera += 150
+        # Diagnóstico antes del respaldo: sin esto no se sabe si el botón no
+        # existe, está oculto o está deshabilitado.
         try:
-            btn = self.page.get_by_test_id(
-                HmTransferelektraLocators.TRANSFER_CONTINUE_BUTTON_0_BUTTON).first
-            await btn.scroll_into_view_if_needed(timeout=1_200)
-            await btn.click(timeout=2_500, force=True)
-            logger.info("✓ click_continue (ruta rápida)")
-            return
+            n = await loc.count()
+            estados = []
+            for i in range(min(n, 8)):
+                b = loc.nth(i)
+                estados.append(f"#{i} visible={await b.is_visible()} "
+                               f"habilitado={await b.is_enabled()}")
+            logger.warning("Continue no clickeable en %.0f s — %d candidato(s): %s",
+                           limite / 1000, n, " · ".join(estados) or "(ninguno)")
         except Exception:
-            logger.info("ruta rápida no aplicó — espero overlays y uso smart_click")
+            pass
+        # Respaldo por JS (lo mismo que se hace en Chronos cuando los overlays
+        # interceptan el puntero): dispara el click desde el propio elemento.
+        try:
+            hecho = await self.page.evaluate(
+                "() => { const b = document.querySelector("
+                "'[data-testid=\"transfer-continue-button-0-button\"]');"
+                " if (!b || b.disabled) return false; b.click(); return true; }")
+            if hecho:
+                logger.info("✓ click_continue (por JS)")
+                return
+        except Exception:
+            pass
         await self.wait_for_no_blocking_overlays(timeout=1_500)
         await self.smart_click(testid=HmTransferelektraLocators.TRANSFER_CONTINUE_BUTTON_0_BUTTON, texto="Continue")
 

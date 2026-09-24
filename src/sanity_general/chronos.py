@@ -7,11 +7,15 @@ funciones sobre una `page` de Playwright, al estilo del resto de módulos.
 Chronos NO usa data-testid: todo va por CSS/XPath y por ÍNDICE de columna, así
 que cualquier cambio de columnas rompe el flujo (así es en el repo original).
 
-Autenticación: Chronos entra por **SSO de Google**. La sesión se guarda en
-`session_state/chronos_storage_state.json` y se reutiliza; si no existe o
-expiró, se hace el login (correo Maxi + contraseña de Gmail) con `CHRONOS_USER`
-y `CHRONOS_PASS`. La primera vez puede pedir 2FA → hay `TIMEOUT_2FA` para
-aprobarlo a mano.
+Autenticación — CAMBIA POR AMBIENTE, y se detecta sola:
+  • TEST → formulario propio de Keycloak: usuario + contraseña, sin 2FA.
+  • PROD → SSO de Google: correo Maxi + contraseña de Gmail + 2FA en el celular.
+Se puede forzar con `CHRONOS_LOGIN_MODE=password|google`.
+
+La sesión (cookies + localStorage) se guarda en `session_state/` y se reutiliza;
+si no existe o expiró, el login se hace SOLO — igual que en Hermes, un único
+comando basta. La espera larga del 2FA solo se activa si el reto aparece de
+verdad, así que en test no se pierde tiempo.
 
 URLs y agencia por ambiente salen de config/settings (HERMES_ENV).
 """
@@ -51,8 +55,29 @@ RE_SUCCESS          = re.compile(r"success|éxito|exito", re.I)
 RE_CLOSE            = re.compile(r"close|cerrar", re.I)
 
 TIMEOUT = 120_000
-# Espera para APROBAR el 2FA en el celular (2 min por defecto; antes 3).
+# Espera para APROBAR el 2FA en el celular. SOLO se usa si de verdad aparece el
+# reto de 2FA (producción); en test el login es directo y no se espera nada.
 TIMEOUT_2FA = int(os.getenv("CHRONOS_2FA_MS", "120000"))
+# Espera del home tras enviar credenciales cuando NO hay 2FA (test).
+TIMEOUT_HOME = int(os.getenv("CHRONOS_HOME_MS", "30000"))
+# Gracia antes de dar la sesión por muerta: Keycloak rebota por el SSO para
+# re-autenticar en silencio, y ese rebote no debe gastar un intento de login.
+GRACIA_SSO = int(os.getenv("CHRONOS_GRACIA_SSO_MS", "3000"))
+
+# ── Login: el SSO cambia por ambiente ───────────────────────────────────────
+# TEST → formulario propio de Keycloak (usuario + contraseña, sin 2FA).
+# PROD → botón de Google → correo + contraseña de Gmail + 2FA en el celular.
+KC_USER   = "#username, input[name='username']"
+KC_PASS   = "#password, input[name='password']"
+KC_SUBMIT = "#kc-login, input[name='login'], button[type='submit']"
+BTN_GOOGLE = "#zocial-google"
+# Cualquiera de estos en pantalla ⇒ estamos en el SSO, no dentro de Chronos.
+SSO_MARCADORES = f"{BTN_GOOGLE}, #identifierId, #username, #kc-form-login"
+# Retos de 2FA de Google (si aparece uno, se espera con paciencia).
+RETO_2FA = ("div#deviceAddressContainer, div[data-challengetype], "
+            "input[name='totpPin'], #idvPreregisteredPhoneNumber, "
+            "div:has-text('2-Step Verification'), "
+            "div:has-text('Verificación en 2 pasos')")
 
 
 def _norm_amount(txt: str) -> str:
@@ -98,50 +123,139 @@ def _es_cookie_relevante(c: dict) -> bool:
     return any(dom.endswith(d) for d in _DOMINIOS_SSO)
 
 
-async def cargar_cookies(context) -> bool:
-    """Inyecta en el contexto las cookies de Chronos guardadas. True si había."""
+def _leer_estado() -> dict:
+    """Lee el archivo de sesión. Acepta el formato viejo (lista de cookies)."""
     ruta = settings.CHRONOS_COOKIES
     if not ruta.exists():
-        logger.info("[Chronos] Sin cookies guardadas — se hará login la 1ª vez.")
+        return {}
+    try:
+        datos = json.loads(ruta.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("[Chronos] Sesión guardada ilegible: %s", str(e)[:90])
+        return {}
+    if isinstance(datos, list):                     # formato anterior
+        return {"cookies": datos, "origins": []}
+    if isinstance(datos, dict):
+        return {"cookies": datos.get("cookies") or [],
+                "origins": datos.get("origins") or []}
+    return {}
+
+
+async def cargar_cookies(context) -> bool:
+    """Restaura la sesión de Chronos en el contexto. True si había algo que usar.
+
+    Se restauran DOS cosas, porque una sola no alcanza:
+      • cookies de Chronos + SSO (permiten el re-login silencioso de Keycloak),
+      • localStorage del origen de Chronos (ahí vive el token de la app Angular).
+    """
+    estado = _leer_estado()
+    cookies, origins = estado.get("cookies") or [], estado.get("origins") or []
+    if not cookies and not origins:
+        logger.info("[Chronos] Sin sesión guardada — se hará login la 1ª vez.")
         return False
     try:
-        cookies = json.loads(ruta.read_text(encoding="utf-8"))
-        if not cookies:
-            return False
-        await context.add_cookies(cookies)
-        logger.info("[Chronos] %d cookies de sesión reutilizadas (sin login).",
-                    len(cookies))
+        if cookies:
+            await context.add_cookies(cookies)
+            logger.info("[Chronos] %d cookies de sesión reutilizadas.", len(cookies))
+        if origins:
+            # El localStorage solo se puede escribir estando EN el origen, así
+            # que se inyecta con un init script que corre antes de la app.
+            payload = json.dumps(origins)
+            await context.add_init_script(
+                "(() => { const data = " + payload + ";"
+                " const o = data.find(d => location.origin.startsWith("
+                "  (d.origin||'').replace(/\\/$/, '')));"
+                " if (!o) return;"
+                " for (const it of (o.localStorage || [])) {"
+                "   try { localStorage.setItem(it.name, it.value); } catch (e) {} }"
+                "})();")
+            logger.info("[Chronos] localStorage de %d origen(es) restaurado.",
+                        len(origins))
         return True
     except Exception as e:
-        logger.warning("[Chronos] No se pudieron cargar las cookies: %s", str(e)[:90])
+        logger.warning("[Chronos] No se pudo restaurar la sesión: %s", str(e)[:90])
         return False
 
 
 async def guardar_cookies(context) -> None:
-    """Guarda las cookies de Chronos + SSO para la próxima corrida."""
+    """Guarda cookies (Chronos + SSO) y localStorage de Chronos."""
     try:
         todas = await context.cookies()
         cookies = [c for c in todas if _es_cookie_relevante(c)]
-        if not cookies:
-            logger.warning("[Chronos] No hay cookies de Chronos que guardar.")
+        origins = []
+        try:
+            estado = await context.storage_state()
+            host = _host_chronos()
+            for o in (estado.get("origins") or []):
+                dom = (urlparse(o.get("origin", "")).hostname or "").lower()
+                if not dom or dom.startswith("test-hermes") or dom.startswith("hermes"):
+                    continue
+                if (host and (dom in host or host in dom)) or _es_dominio_sso(dom):
+                    origins.append(o)
+        except Exception:
+            pass
+        if not cookies and not origins:
+            logger.warning("[Chronos] No hay sesión de Chronos que guardar.")
             return
         settings.SESSION_DIR.mkdir(parents=True, exist_ok=True)
         settings.CHRONOS_COOKIES.write_text(
-            json.dumps(cookies, indent=2), encoding="utf-8")
-        logger.info("[Chronos] %d cookies de sesión guardadas en %s",
-                    len(cookies), settings.CHRONOS_COOKIES.name)
+            json.dumps({"cookies": cookies, "origins": origins}, indent=2),
+            encoding="utf-8")
+        logger.info("[Chronos] Sesión guardada (%d cookies · %d origen/es) en %s",
+                    len(cookies), len(origins), settings.CHRONOS_COOKIES.name)
     except Exception as e:
-        logger.warning("[Chronos] No se pudieron guardar las cookies: %s", str(e)[:90])
+        logger.warning("[Chronos] No se pudo guardar la sesión: %s", str(e)[:90])
 
 
-async def sesion_activa(page) -> bool:
-    """True si Chronos ya está dentro (el botón Menu del home es visible)."""
+def _es_dominio_sso(dom: str) -> bool:
+    return any(dom.endswith(d) for d in _DOMINIOS_SSO)
+
+
+async def en_pantalla_de_login(page) -> bool:
+    """True si la página actual es el SSO (Keycloak o Google), no Chronos."""
     try:
-        await page.locator(TOOLBAR_MENU).first.wait_for(
-            state="visible", timeout=settings.TIMEOUT_READY)
-        return True
+        url = (page.url or "").lower()
+        if "accounts.google.com" in url or "/auth/realms" in url:
+            return True
+        return bool(await page.locator(SSO_MARCADORES).first.count())
     except Exception:
         return False
+
+
+async def sesion_activa(page, timeout_ms: int = None) -> bool:
+    """True si Chronos ya está dentro (el botón Menu del home es visible).
+
+    Se resuelve por SONDEO rápido (no por `networkidle`: el home de Chronos
+    hace polling de notificaciones y nunca queda inactivo, así que esperar
+    'red inactiva' regalaba segundos en cada llamada).
+
+    En cuanto ve el Menu devuelve True; en cuanto ve el SSO devuelve False.
+    Así el caso arranca de inmediato cuando la sesión ya estaba viva."""
+    limite = timeout_ms if timeout_ms is not None else settings.TIMEOUT_READY
+    menu = page.locator(TOOLBAR_MENU).first
+    login = page.locator(SSO_MARCADORES).first
+    espera = 0
+    sso_seguido = 0        # ms que el SSO lleva visible SIN interrupción
+    while espera <= limite:
+        try:
+            if await menu.is_visible():
+                return True
+        except Exception:
+            pass
+        # Ver el SSO un instante NO significa que la sesión murió: Keycloak
+        # rebota por ahí para re-autenticar en silencio. Solo se da por muerta
+        # si el SSO se queda en pantalla de forma sostenida (GRACIA_SSO).
+        try:
+            sso_seguido = (sso_seguido + 250) if await login.is_visible() else 0
+        except Exception:
+            sso_seguido = 0
+        if sso_seguido >= GRACIA_SSO:
+            logger.info("[Chronos] SSO estable %.1f s — la sesión no está activa.",
+                        sso_seguido / 1000)
+            return False
+        await page.wait_for_timeout(250)
+        espera += 250
+    return False
 
 
 async def abrir_chronos(page, *, login_si_necesario: bool = True) -> bool:
@@ -151,55 +265,158 @@ async def abrir_chronos(page, *, login_si_necesario: bool = True) -> bool:
     activa NO hace login (clave: el SSO de Google limita los intentos),
     (4) si no, hace login y GUARDA las cookies para las próximas corridas."""
     context = page.context
-    tenia_cookies = await cargar_cookies(context)
+    tenia_sesion = await cargar_cookies(context)
 
     logger.info("[Chronos] Navegando a %s", settings.CHRONOS_URL)
-    await page.goto(settings.CHRONOS_URL, wait_until="domcontentloaded",
-                   timeout=settings.TIMEOUT_NAVIGATION)
+    try:
+        await page.goto(settings.CHRONOS_URL, wait_until="domcontentloaded",
+                        timeout=settings.TIMEOUT_NAVIGATION)
+    except Exception as e:
+        logger.warning("[Chronos] La navegación tardó (%s) — continúo.", str(e)[:70])
     if await sesion_activa(page):
         logger.info("[Chronos] ✓ Sesión activa — login omitido.")
         await guardar_cookies(context)      # refresca la expiración
         return True
 
-    if tenia_cookies:
-        logger.info("[Chronos] Las cookies guardadas ya no sirven — se renueva el login.")
+    if tenia_sesion:
+        logger.info("[Chronos] La sesión guardada ya no sirve — se renueva el login.")
     if not login_si_necesario:
         return False
 
-    # Sesión no activa → LOGIN y CONTINUAR (igual que la fixture de Hermes).
-    logger.info("[Chronos] Sesión no activa — ejecutando login…")
-    await login_google(page)
-
-    # Revalidar: tras el SSO la app puede quedar en una pantalla intermedia, así
-    # que se re-navega al home y se comprueba (hasta 2 vueltas) antes de rendirse.
+    # Sesión no activa → LOGIN AUTOMÁTICO y CONTINUAR, igual que Hermes: un solo
+    # comando basta, no hace falta correr nada aparte.
     for intento in (1, 2):
+        logger.info("[Chronos] Sesión no activa — ejecutando login (intento %d/2)…",
+                    intento)
+        await login(page)
+        # Tras el SSO la app puede quedar en una pantalla intermedia: se
+        # re-navega al home y se comprueba antes de reintentar.
         if await sesion_activa(page):
             logger.info("[Chronos] ✓ Sesión establecida — continúo con el flujo.")
             await guardar_cookies(context)
             return True
-        logger.info("[Chronos] Revalidando sesión (intento %d)…", intento)
         try:
             await page.goto(settings.CHRONOS_URL, wait_until="domcontentloaded",
                             timeout=settings.TIMEOUT_NAVIGATION)
         except Exception:
             pass
-    logger.error("[Chronos] No se pudo establecer la sesión. Corre una vez "
-                 "`python tools/login_chronos.py` y reintenta.")
+        if await sesion_activa(page):
+            logger.info("[Chronos] ✓ Sesión establecida tras revalidar.")
+            await guardar_cookies(context)
+            return True
+        if not await en_pantalla_de_login(page):
+            break        # no está en el SSO: reintentar el login no ayudaría
+
+    logger.error("[Chronos] No se pudo establecer la sesión. Revisa CHRONOS_USER / "
+                 "CHRONOS_PASS y que hayas aprobado el 2FA en el celular "
+                 "(espera actual: %d min, ajustable con CHRONOS_2FA_MS).",
+                 TIMEOUT_2FA // 60000)
     return False
 
 
-async def login_google(page) -> bool:
-    """Login de Chronos por SSO de Google (correo Maxi + contraseña de Gmail).
+async def _esperar_home(page, *, permitir_2fa: bool) -> bool:
+    """Espera el home de Chronos SIN regalar tiempo.
 
-    La primera vez puede pedir 2FA: se espera hasta TIMEOUT_2FA para aprobarlo
-    manualmente (igual que el flujo de Hermes)."""
+    Sondea cada 250 ms y devuelve en cuanto el Menu es visible — antes se hacía
+    `wait_for_url(..., timeout=TIMEOUT_2FA)`, que seguía esperando aunque el
+    home ya estuviera cargado. La espera larga del 2FA solo se activa si el reto
+    aparece de verdad en pantalla (producción)."""
+    menu = page.locator(TOOLBAR_MENU).first
+    reto = page.locator(RETO_2FA).first
+    limite = TIMEOUT_HOME
+    aviso_2fa = False
+    espera = 0
+    while espera <= limite:
+        try:
+            if await menu.is_visible():
+                logger.info("[Chronos] Home visible (%.1f s).", espera / 1000)
+                return True
+        except Exception:
+            pass
+        if permitir_2fa and not aviso_2fa:
+            try:
+                if await reto.count() and await reto.is_visible():
+                    aviso_2fa = True
+                    limite = TIMEOUT_2FA
+                    logger.info("[Chronos] 2FA solicitado — APRUÉBALO en el "
+                                "celular (hasta %d min)…", TIMEOUT_2FA // 60000)
+            except Exception:
+                pass
+        await page.wait_for_timeout(250)
+        espera += 250
+    logger.warning("[Chronos] El home no apareció en %.0f s.", limite / 1000)
+    return False
+
+
+async def login(page) -> bool:
+    """Login de Chronos, con el método que corresponda al ambiente.
+
+    TEST usa el formulario de Keycloak (usuario + contraseña); PRODUCCIÓN usa el
+    SSO de Google con 2FA. Por defecto se DETECTA mirando la pantalla, así que
+    no hay que configurar nada; `CHRONOS_LOGIN_MODE=password|google` lo fuerza."""
+    modo = (settings.CHRONOS_LOGIN_MODE or "auto").lower()
+    if modo == "auto":
+        # OJO con el orden: Keycloak muestra el formulario de usuario Y el botón
+        # de Google a la vez. Si hay campo de usuario se prefiere el formulario,
+        # que es determinístico y no gasta intentos del SSO ni pide 2FA.
+        # En producción manda el ambiente, porque ahí el acceso es por Google.
+        prefiere_google = settings.por_ambiente(False, True)
+        try:
+            hay_form = bool(await page.locator(KC_USER).first.count())
+            hay_google = bool(await page.locator(BTN_GOOGLE).first.count())
+            if hay_form and not prefiere_google:
+                modo = "password"
+            elif hay_google:
+                modo = "google"
+            elif hay_form:
+                modo = "password"
+            else:
+                modo = "google" if prefiere_google else "password"
+        except Exception:
+            modo = "google" if prefiere_google else "password"
+    logger.info("[Chronos] Login por %s.",
+                "usuario y contraseña (Keycloak)" if modo == "password"
+                else "SSO de Google + 2FA")
+    return (await login_password(page) if modo == "password"
+            else await login_google(page))
+
+
+async def login_password(page) -> bool:
+    """Login de TEST: formulario propio de Keycloak (sin 2FA)."""
+    usuario, clave = settings.CHRONOS_USER, settings.CHRONOS_PASS
+    if not usuario or not clave:
+        logger.error("[Chronos] Faltan CHRONOS_USER / CHRONOS_PASS en el .env.")
+        return False
+    try:
+        campo = page.locator(KC_USER).first
+        await campo.wait_for(state="visible", timeout=30_000)
+        await campo.fill(usuario)
+        await page.locator(KC_PASS).first.fill(clave)
+        logger.info("[Chronos] Credenciales de %s enviadas.", usuario)
+        try:
+            await page.locator(KC_SUBMIT).first.click(timeout=10_000)
+        except Exception:
+            await page.locator(KC_PASS).first.press("Enter")
+        ok = await _esperar_home(page, permitir_2fa=False)
+        logger.info("[Chronos] Login %s.", "OK" if ok else "no confirmado")
+        return ok
+    except Exception as e:
+        logger.warning("[Chronos] Login con usuario/contraseña falló: %s", str(e)[:120])
+        return False
+
+
+async def login_google(page) -> bool:
+    """Login de PRODUCCIÓN por SSO de Google (correo Maxi + contraseña de Gmail).
+
+    Si Google pide 2FA se espera hasta TIMEOUT_2FA para aprobarlo en el celular;
+    si no lo pide, entra de inmediato (no se espera de más)."""
     usuario, clave = settings.CHRONOS_USER, settings.CHRONOS_PASS
     if not usuario or not clave:
         logger.error("[Chronos] Faltan CHRONOS_USER / CHRONOS_PASS en el .env.")
         return False
     try:
         # Botón "Google" del SSO
-        btn = page.locator("#zocial-google").first
+        btn = page.locator(BTN_GOOGLE).first
         await btn.wait_for(state="visible", timeout=60_000)
         await btn.click()
         # Selector de cuentas: SOLO si Google lo muestra explícitamente
@@ -251,10 +468,9 @@ async def login_google(page) -> bool:
         except Exception:
             logger.info("[Chronos] No se pidió contraseña (sesión de Google ya "
                         "autenticada) — esperando el home.")
-        # Home de Chronos (media el 2FA que apruebas en el celular → espera larga)
-        await page.wait_for_url(settings.CHRONOS_READY_URL,
-                                timeout=TIMEOUT_2FA)
-        ok = await sesion_activa(page)
+        # Home de Chronos: sondeo rápido. La espera larga solo se activa si el
+        # reto de 2FA aparece de verdad.
+        ok = await _esperar_home(page, permitir_2fa=True)
         logger.info("[Chronos] Login %s.", "OK" if ok else "no confirmado")
         return ok
     except Exception as e:

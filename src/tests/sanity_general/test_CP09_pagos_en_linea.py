@@ -3,7 +3,8 @@ CP09 — Pagos en Línea: depósito, cargo y pago online.
 (Rescate de `HERMES2-qa/.../test_CP09_pagos_en_linea.py`.)
 
 Flujo (Chronos primero, luego Hermes):
-  1. Abrir Chronos en una pestaña nueva (sesión reutilizada, sin login).
+  1. Abrir Chronos en una pestaña nueva (sesión reutilizada; si expiró, el
+     login por SSO se hace SOLO — igual que Hermes).
   2. Collection > Agent Monitor → buscar la agencia.
   3. Agregar DEPÓSITO ($1, nota 'test').
   4. Agregar OTRO CARGO (Credit, memo '4406-02 Balance Transfer Credit', $1).
@@ -14,8 +15,10 @@ Flujo (Chronos primero, luego Hermes):
 
 Agencia y alias salen del ambiente activo (HERMES_ENV).
 
-REQUISITO: la sesión de Chronos debe estar guardada. Si no, córrelo una vez:
-    python tools/login_chronos.py
+SESIÓN DE CHRONOS: automática. Si no hay sesión válida, el propio caso hace el
+login por SSO (correo + contraseña del .env) y espera a que apruebes el 2FA en
+el celular (CHRONOS_2FA_MS, 2 min por defecto). La sesión queda guardada, así
+que las siguientes corridas ni siquiera piden 2FA.
 
 COMO CORRER:
     pytest src/tests/sanity_general -k CP09 -v -s --headed
@@ -64,8 +67,9 @@ async def test_CP09_pagos_en_linea(logged_page: Page, language, width, height):
         chronos_page = await logged_page.context.new_page()
         try:
             dentro = await CR.abrir_chronos(chronos_page)
-            assert dentro, ("No se pudo entrar a Chronos. Corre una vez "
-                            "`python tools/login_chronos.py` para guardar la sesión.")
+            assert dentro, ("No se pudo entrar a Chronos (ni con la sesión "
+                            "guardada ni con el login por SSO). Revisa "
+                            "CHRONOS_USER/CHRONOS_PASS y la aprobación del 2FA.")
             evi_ch = Evidencia(ScreenshotHelper(chronos_page), EVIDENCE, start=evi.n)
 
             # Step 2: Agent Monitor + buscar agencia
@@ -98,12 +102,18 @@ async def test_CP09_pagos_en_linea(logged_page: Page, language, width, height):
                         resultado["ajustado"])
             evi.n = evi_ch.n                    # continúa la numeración
         finally:
-            # Step 7: cerrar Chronos y volver a Hermes
+            # Step 7: cerrar Chronos y volver a Hermes.
+            # TODO va en try/except: si el navegador ya murió, un error aquí
+            # ENMASCARA el fallo real del caso (bring_to_front lanzaba
+            # TargetClosedError y tapaba el error de 'Otro cargo').
             try:
                 await chronos_page.close()
             except Exception:
                 pass
-            await logged_page.bring_to_front()
+            try:
+                await logged_page.bring_to_front()
+            except Exception as e:
+                logger.warning("[CP09] No se pudo volver a Hermes: %s", str(e)[:80])
         logger.info("[CP09] Steps 1–7 OK (Chronos).")
 
     # ── Step 8: Hermes — pago en línea ───────────────────────────────────────

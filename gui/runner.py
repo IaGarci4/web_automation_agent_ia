@@ -35,6 +35,10 @@ CP_NOMBRES = {
     "CP06": "Recargas (Top Ups) — Lunex/DTOne",
     "CP07": "Cheque individual (scan) + rechazo en Chronos",
     "CP09": "Pagos en Línea (depósito, cargo y pago)",
+    "CP10": "Ficha de Depósitos (foto, zoom y recibo digital)",
+    "CP11": "Fax de entrada y salida (multi-agencia)",
+    "CP12": "Reportes de Balance (continuo y por cajero)",
+    "CP22": "Money Order con Info Adicional (imprime y anula)",
 }
 CP_NOMBRES_EN = {
     "CP01": "Money Transfer Cash + KYC",
@@ -45,6 +49,10 @@ CP_NOMBRES_EN = {
     "CP06": "Top-Ups (Recharges) — Lunex/DTOne",
     "CP07": "Individual check scan + reject in Chronos",
     "CP09": "Online Payments (deposit, charge and payment)",
+    "CP10": "Deposit Slip (photo, zoom and digital receipt)",
+    "CP11": "Inbound and outbound fax (multi-agency)",
+    "CP12": "Balance reports (continuous and by cashier)",
+    "CP22": "Money Order with Additional Info (print and void)",
 }
 
 # Sub-casos que se pueden correr por separado (además del CP completo).

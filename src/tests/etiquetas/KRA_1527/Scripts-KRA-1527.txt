@@ -1,0 +1,21 @@
+cd C:\Repositorios\AutomationAgent
+
+# 1) Empezar de cero (borra evidencias y reporte; NO borra los .DMP)
+python tools/kra1527_reset.py
+
+# 2) Correr TODO (headed). El preflight dispara solo la compuerta del inspector
+$env:PW_HEADLESS="0"; pytest src/tests/etiquetas/KRA_1527 -v -s
+
+# 3) Un caso suelto (recomendado mientras estabilizas)
+$env:PW_HEADLESS="0"; pytest src/tests/etiquetas/KRA_1527/test_CP05_ReimpresionRecibo.py -v -s
+#   o por filtro:  pytest src/tests/etiquetas/KRA_1527 -k CP01 -v -s
+
+==============================================================================================================
+# Solo auditar tráfico, sin volcar memoria
+$env:KRA1527_DUMP="0"; pytest src/tests/etiquetas/KRA_1527 -v -s
+
+# Dejar las transacciones vivas para verlas en la app (no cancela)
+$env:KRA1527_CANCELAR="0"; pytest src/tests/etiquetas/KRA_1527 -k CP01 -v -s
+
+# Ejecutar aunque el agente no corra (para ver el fallo real)
+$env:KRA1527_SIN_AGENTE="fallar"; pytest src/tests/etiquetas/KRA_1527 -v -s

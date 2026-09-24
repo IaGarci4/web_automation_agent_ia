@@ -40,6 +40,17 @@ def ejecutar_test(archivo: str, test: str = None, overrides: dict = None,
     Returns:
         dict: {ok, duracion, evidencias, comando}
     """
+    # KRA-1526 (IDOR): al invocar cualquier CP por nombre, correr la etiqueta con
+    # su marker — los casos comparten una captura de sesión, así que van juntos y
+    # producen un reporte. MONO (CP01–07) y MULTI (CP08/09) están SEPARADOS: el
+    # multi lleva su propio marker y reporte, y corre en la agencia 0040.
+    _al = str(archivo).lower()
+    _kra1526_multi = False
+    if "kra_1526" in _al:
+        _kra1526_multi = ("multi" in _al) or ("cp08" in _al) or ("cp09" in _al)
+        archivo = "src/tests/etiquetas/KRA_1526"
+        marker = marker or ("idor_multi" if _kra1526_multi else "idor")
+
     comando = [sys.executable, "-m", "pytest", archivo, "-v", "-s"]
     if marker:
         comando += ["-m", marker]
@@ -48,6 +59,28 @@ def ejecutar_test(archivo: str, test: str = None, overrides: dict = None,
     if extra_args:
         comando += list(extra_args)
     env = os.environ.copy()
+    # KRA-1526 multi-agente: activa el gate y la agencia 0040 al invocarlo por NL.
+    if _kra1526_multi:
+        env.setdefault("KRA1526_MULTI", "1")
+        env.setdefault("KRA1526_AGENCY", "0040")
+        print("  👥 KRA-1526 MULTI-AGENTE ACTIVADO (KRA1526_MULTI=1, agencia "
+              f"{env['KRA1526_AGENCY']})")
+    # Herramientas de direcciones (KRA-1527): se auto-activan al ejecutarlas por
+    # nombre desde el agente (si no, se saltan por diseño). No afecta a otros tests.
+    _arch = str(archivo).lower()
+    if "valida_direccion" in _arch:
+        env.setdefault("KRA1527_VALIDA_DIR", "1")
+        env.setdefault("KRA1527_DIR_ITER", "20")
+        print(f"  🏠 Validación de direcciones ACTIVADA "
+              f"(KRA1527_VALIDA_DIR=1, {env['KRA1527_DIR_ITER']} vueltas)")
+    elif "reproduce_direccion_bank" in _arch:
+        env.setdefault("KRA1527_REPRO_DIR", "1")
+        print("  🏠 Reproductor del banco de direcciones ACTIVADO (KRA1527_REPRO_DIR=1)")
+    elif "auditar_validacion" in _arch:
+        env.setdefault("KRA1527_AUDIT", "1")
+        env.setdefault("KRA1527_AUDIT_ITER", "5")
+        print(f"  🔬 Auditoría DevTools del validador ACTIVADA "
+              f"(KRA1527_AUDIT=1, {env['KRA1527_AUDIT_ITER']} muestras)")
     if overrides:
         env["FLOW_OVERRIDES"] = json.dumps(overrides, ensure_ascii=False)
         print(f"  🎯 Datos fijados: {overrides}  (lo demás → Faker)")

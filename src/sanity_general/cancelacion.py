@@ -17,6 +17,31 @@ from src.helpers.session_helper import seleccionar_agencia, modal_agencia_visibl
 logger = get_logger("sanity.cancelacion")
 
 
+async def cerrar_warning_salir(flow, timeout_ms: int = 4_000) -> bool:
+    """Cierra el 'Warning: Are you sure you want to leave this page?' EN CUANTO
+    aparece, sondeando cada 150 ms.
+
+    Importante el ORDEN: este modal ES un overlay bloqueante, así que llamar
+    antes a `wait_for_no_blocking_overlays` agotaba el timeout completo esperando
+    que se fuera algo que solo se va al confirmar. Primero se confirma, después
+    se esperan overlays."""
+    btn = flow.page.get_by_test_id("modal-confirmation-deny-button").first
+    espera = 0
+    while espera <= timeout_ms:
+        try:
+            if await btn.is_visible():
+                await btn.click(timeout=2_500)
+                logger.info("[Cancelación] 'YES, Leave' confirmado (%.1f s).",
+                            espera / 1000)
+                await flow.page.wait_for_timeout(300)
+                return True
+        except Exception:
+            pass
+        await flow.page.wait_for_timeout(150)
+        espera += 150
+    return False
+
+
 async def ir_a_reportes_transacciones(flow, multi: bool = False, agency: str = None) -> None:
     """Navega a Reportes → Transacciones, tolerando el diálogo 'salir del sitio'.
 
@@ -27,16 +52,14 @@ async def ir_a_reportes_transacciones(flow, multi: bool = False, agency: str = N
     modal). Al final, GUARDA: no se continúa hasta que el modal cierre (si no,
     la búsqueda tecleaba el nombre del cliente en el buscador de agencia)."""
     if not (multi and agency):
-        # Flujo mono (sin agencia)
+        # Flujo mono (sin agencia). ORDEN: navegar → cerrar el Warning en cuanto
+        # aparezca → recién entonces esperar overlays (con timeout corto).
         await flow.click_reports()
-        await flow.wait_for_no_blocking_overlays()
+        await cerrar_warning_salir(flow)
+        await flow.wait_for_no_blocking_overlays(timeout=1_500)
         await flow.click_transactions()
-        await flow.wait_for_no_blocking_overlays()
-        try:
-            await flow.click_yes_leave()
-        except Exception:
-            pass
-        await flow.wait_for_no_blocking_overlays()
+        await cerrar_warning_salir(flow)
+        await flow.wait_for_no_blocking_overlays(timeout=1_500)
         return
 
     # ── MULTIAGENTE ──────────────────────────────────────────────────────────
@@ -49,15 +72,7 @@ async def ir_a_reportes_transacciones(flow, multi: bool = False, agency: str = N
         return "reports/transactions" in flow.page.url.lower()
 
     async def _leave_si_aparece():
-        # 'Leave site?/¿Salir?' — click RÁPIDO solo si el modal está visible (~2.5s),
-        # sin dejar que smart_click se cuelgue esperando un modal ausente.
-        try:
-            btn = flow.page.get_by_test_id("modal-confirmation-deny-button").first
-            await btn.wait_for(state="visible", timeout=2_500)
-            await btn.click(timeout=3_000)
-            await flow.page.wait_for_timeout(500)
-        except Exception:
-            pass
+        await cerrar_warning_salir(flow, timeout_ms=2_500)
 
     en_transacciones = False
     for intento in range(1, 8):
@@ -72,15 +87,16 @@ async def ir_a_reportes_transacciones(flow, multi: bool = False, agency: str = N
             en_transacciones = True
             logger.info("[Cancelación][Multi] En reporte de Transacciones (intento %d).", intento)
             break
-        # 3) Navegar Reports > Transactions
+        # 3) Navegar Reports > Transactions (el Warning se cierra al instante)
         await flow.click_reports()
-        await flow.wait_for_no_blocking_overlays()
+        await _leave_si_aparece()
+        await flow.wait_for_no_blocking_overlays(timeout=1_500)
         try:
             await flow.click_transactions()
         except Exception:
             pass
-        await flow.wait_for_no_blocking_overlays()
         await _leave_si_aparece()
+        await flow.wait_for_no_blocking_overlays(timeout=1_500)
         # Poll corto: dar tiempo a que monte el modal de agencia o Transacciones
         t = 0
         while t < 10_000:

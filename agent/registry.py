@@ -58,27 +58,47 @@ def escanear_pages() -> dict:
 
 
 def escanear_tests() -> dict:
-    """Descubre los tests ejecutables (CPs) con sus pasos."""
+    """Descubre los tests ejecutables (CPs) con sus pasos.
+
+    El barrido es **recursivo**. Antes era `glob("test_*.py")`, que solo mira
+    el primer nivel de `src/tests/`, así que todo lo que vive en subcarpetas
+    —`etiquetas/KRA_1527/`, `etiquetas/TRN_239/`, `sanity_general/`,
+    `deploy/`— quedaba fuera del catálogo. El agente decía no conocer casos
+    que llevaban meses en el repo, y la causa no era el agente: era un
+    asterisco de más.
+    """
     tests = {}
     if not TESTS_DIR.exists():
         return tests
 
-    for f in sorted(TESTS_DIR.glob("test_*.py")):
+    for f in sorted(TESTS_DIR.rglob("test_*.py")):
+        if "__pycache__" in f.parts:
+            continue
         try:
             src  = f.read_text(encoding="utf-8")
             tree = ast.parse(src)
-        except SyntaxError:
+        except (SyntaxError, OSError, UnicodeDecodeError):
             continue
         mod_doc = ast.get_docstring(tree) or ""
+        # La carpeta padre distingue a qué suite pertenece: hay CP01 en el
+        # sanity, en KRA-1527 y en TRN-239, y sin esto el último en leerse
+        # pisaba a los anteriores en el catálogo.
+        grupo = f.parent.name if f.parent != TESTS_DIR else "general"
         for node in ast.walk(tree):
             if (isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
                     and node.name.startswith("test_")):
                 pasos = re.findall(r"await flow\.(\w+)\(", src)
-                tests[node.name] = {
+                clave = node.name if node.name not in tests \
+                    else f"{grupo}::{node.name}"
+                tests[clave] = {
                     "archivo": str(f.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                    "grupo"  : grupo,
                     "doc"    : (ast.get_docstring(node) or mod_doc).strip().split("\n")[0],
                     "pasos"  : pasos,
                     "usa_sesion": "logged_page" in src,
+                    # TRN-239 no usa navegador: llama a la API directo. El
+                    # agente necesita saberlo para no prometer capturas.
+                    "usa_api": "lunex_api" in src or "api_lunex" in src,
                 }
     return tests
 

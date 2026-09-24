@@ -59,11 +59,19 @@ class Evidencia:
         self.n = start
 
     async def shot(self, nombre: str, *, locators=None, search_text=None,
-                   selector=None) -> str:
-        """Captura la siguiente evidencia (NN_<nombre>.png). Con `locators` o
-        `search_text` usa resaltado verde; si no, captura simple. No lanza."""
+                   selector=None, paso: int = None) -> str:
+        """Captura la siguiente evidencia. Con `locators` o `search_text` usa
+        resaltado verde; si no, captura simple. No lanza.
+
+        `paso`: número del paso del caso en QMetry. Si se indica, el archivo se
+        nombra **StepPP-<nombre>.png** (ej. `Step02-cliente_beneficiario.png`).
+        Así la integración con QMetry lo sube al paso correcto SIN mapeo, y
+        varias imágenes pueden compartir el mismo paso.
+        Sin `paso`, se conserva el formato `NN_<nombre>.png`."""
         self.n += 1
-        path = ev(self.cp, f"{self.n:02d}_{nombre}.png")
+        etiqueta = (f"Step{int(paso):02d}-{nombre}" if paso
+                    else f"{self.n:02d}_{nombre}")
+        path = ev(self.cp, f"{etiqueta}.png")
         try:
             if locators or search_text:
                 await self.screenshot.screenshot_with_highlight(

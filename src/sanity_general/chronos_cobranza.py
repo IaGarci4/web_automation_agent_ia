@@ -78,35 +78,141 @@ async def _click_js(locator) -> None:
     await locator.evaluate("(el) => el.click()")
 
 
-async def _cerrar_modal(page, re_texto, desc: str) -> None:
-    """Espera el modal con ese texto y lo cierra con Close (por JS)."""
+# Botones de los modales de Chronos.
+#
+# Se buscan GLOBALMENTE y se filtra por la VISIBILIDAD DEL BOTÓN. No sirve usar
+# `div.modal-content` como guarda: Chronos deja los modales anteriores en el DOM
+# (ocultos), `.first` caía en uno de esos y parecía que "no había modal".
+#
+# `[appautofocus]` es el discriminador fino: en el Warning SOLO el botón **Yes**
+# lo lleva; el **No** tiene idénticas clases (`btn btn-blue`) pero sin ese
+# atributo. Por eso Yes y No se distinguen sin ambigüedad.
+BTN_YES = "button.btn-blue[appautofocus]"
+BTN_NO = "button.btn-blue:not([appautofocus])"
+RE_NO = re.compile(r"^\s*(no)\s*$", re.I)
+
+
+async def _visible(page, selector: str, patron, limite: int = 12):
+    """Primer botón **realmente visible** que casa selector + texto, o None.
+
+    Recorre TODAS las coincidencias, no solo `.first`. Esto es esencial: Chronos
+    deja los modales anteriores en el DOM (ocultos), así que `.first` resolvía a
+    un botón viejo e invisible y el `Yes` real —el del modal nuevo, más abajo en
+    el DOM— nunca se encontraba. Fue justo lo que pasó en 'Other Charges' después
+    de que el depósito dejara su modal atrás."""
+    loc = page.locator(selector).filter(has_text=patron)
     try:
-        texto = page.locator("p.modal-text").filter(has_text=re_texto).first
-        await texto.wait_for(state="visible", timeout=TIMEOUT)
-        modal = page.locator("div.modal-content").filter(has=texto).first
-        btn = modal.locator("button").filter(has_text=RE_CLOSE).first
-        await btn.wait_for(state="visible", timeout=30_000)
+        total = min(await loc.count(), limite)
+    except Exception:
+        return None
+    for i in range(total):
+        btn = loc.nth(i)
         try:
-            await btn.scroll_into_view_if_needed(timeout=5_000)
+            if await btn.is_visible():
+                return btn
+        except Exception:
+            continue
+    return None
+
+
+async def _resolver_guardado(page, re_exito, desc: str,
+                             timeout_ms: int = 30_000) -> bool:
+    """Resuelve TODO lo que sale después de pulsar 'Add', en cualquier orden.
+
+    Chronos puede mostrar el Warning de duplicado antes, después o en lugar del
+    modal de éxito. Antes esto eran dos pasos rígidos (confirmar → cerrar) con
+    esperas fijas: si el Warning llegaba tarde, el paso de éxito se quedaba los
+    120 s del timeout esperando detrás de él.
+
+    Regla importante: **'Yes' se pulsa UNA sola vez**. Ese botón confirma crear
+    el registro duplicado, así que repetirlo genera depósitos/cargos de más
+    (fue lo que dejó la nota vacía en la corrida anterior)."""
+    yes_usado = False
+    espera = 0
+    while espera <= timeout_ms:
+        # 1) ¿Ya está el modal de éxito? → cerrar y terminar.
+        #    Igual que con los botones: se recorren todas las coincidencias,
+        #    porque los textos de modales previos siguen en el DOM.
+        exito = await _visible(page, "p.modal-text", re_exito)
+        try:
+            if exito is not None:
+                cerrar = await _visible(page, "div.modal-content button", RE_CLOSE) \
+                    or await _visible(page, "button", RE_CLOSE)
+                if cerrar is not None:
+                    await _click_js(cerrar)
+                logger.info("[Cobranza] %s", desc)
+                await page.wait_for_timeout(500)
+                return True
         except Exception:
             pass
-        await _click_js(btn)
-        logger.info("[Cobranza] %s", desc)
-    except Exception as e:
-        logger.warning("[Cobranza] No se confirmó '%s': %s", desc, str(e)[:90])
+        # 2) ¿Warning de duplicado? → Yes (solo la primera vez).
+        if not yes_usado:
+            btn = await _visible(page, BTN_YES, RE_YES)
+            if btn is not None:
+                await _click_js(btn)
+                yes_usado = True
+                logger.info("[Cobranza] Warning de duplicado → Yes (%.1f s).",
+                            espera / 1000)
+                await page.wait_for_timeout(700)
+                continue
+        await page.wait_for_timeout(200)
+        espera += 200
+    logger.warning("[Cobranza] No se confirmó '%s' en %.0f s.", desc,
+                   timeout_ms / 1000)
+    return False
 
 
-async def _confirmar_warning(page, re_texto, timeout_ms: int = 3_000) -> None:
-    """Modal 'ya existe con la misma fecha y monto' → Yes (opcional)."""
-    try:
-        texto = page.locator("p.modal-text").filter(has_text=re_texto).first
-        if await texto.is_visible(timeout=timeout_ms):
-            btn = page.locator("div.modal-footer button").filter(has_text=RE_YES).first
-            await btn.wait_for(state="visible", timeout=30_000)
-            await _click_js(btn)
-            logger.info("[Cobranza] Advertencia de duplicado → Yes.")
-    except Exception:
-        pass
+async def limpiar_modales(page, *, timeout_ms: int = 1_000, vueltas: int = 3) -> int:
+    """Desbloquea la pantalla cerrando modales REZAGADOS. Nunca pulsa 'Yes'.
+
+    Se usa ANTES de una acción (pestañas, menú, lecturas). Si quedó un Warning
+    colgado, lo correcto es **cancelarlo con 'No'**: desbloquea igual y, a
+    diferencia de 'Yes', no crea un registro duplicado a espaldas del caso.
+
+    Orden: Close → No → X. Barato: si no hay nada visible sale en ~1 s."""
+    candidatos = (
+        ("div.modal-content button", RE_CLOSE, "Close"),
+        ("button", RE_CLOSE, "Close"),
+        (BTN_NO, RE_NO, "No"),
+    )
+    cerrados = 0
+    for _ in range(vueltas):
+        actuo = False
+        espera = 0
+        while espera <= timeout_ms and not actuo:
+            for sel, patron, etiqueta in candidatos:
+                btn = await _visible(page, sel, patron)
+                if btn is None:
+                    continue
+                try:
+                    await _click_js(btn)
+                    logger.info("[Cobranza] Modal rezagado cerrado con '%s'.",
+                                etiqueta)
+                    cerrados += 1
+                    actuo = True
+                    await page.wait_for_timeout(500)
+                    break
+                except Exception:
+                    continue
+            if actuo:
+                break
+            await page.wait_for_timeout(150)
+            espera += 150
+        if not actuo:
+            try:                      # último recurso: la X del encabezado
+                x = page.locator("div.modal-header button.close, "
+                                 "div.modal-header .close, "
+                                 "div.modal-header span.close").first
+                if await x.is_visible():
+                    await _click_js(x)
+                    logger.info("[Cobranza] Modal rezagado cerrado con la X.")
+                    cerrados += 1
+                    await page.wait_for_timeout(500)
+                    continue
+            except Exception:
+                pass
+            break
+    return cerrados
 
 
 # ── Navegación ──────────────────────────────────────────────────────────────
@@ -123,6 +229,7 @@ async def ir_a_agent_monitor(page) -> None:
 
 async def ir_a_collection(page) -> None:
     """Menu → Collection → Collection (submenú)."""
+    await limpiar_modales(page)          # el menú también se bloquea con modales
     await CR._click_listo(page, page.locator(CR.TOOLBAR_MENU).first, "Menu abierto")
     await page.wait_for_timeout(1_000)
     sub = page.locator(COLLECTION_SUB).first
@@ -168,6 +275,7 @@ async def agregar_deposito(page, monto: str = MONTO_UNO, nota: str = NOTA) -> bo
     """Pestaña Deposits → monto + notas → Add → confirma y valida la 1ª fila."""
     logger.info("[Cobranza] Agregando depósito de $%s…", monto)
     try:
+        await limpiar_modales(page)
         tab = page.locator('a[role="tab"]').filter(has_text=RE_DEPOSITS).nth(1)
         await CR._click_listo(page, tab, "Pestaña Deposits")
 
@@ -198,8 +306,7 @@ async def agregar_deposito(page, monto: str = MONTO_UNO, nota: str = NOTA) -> bo
             "div.row.col-12.justify-content-center > button.btn.btn-blue").first
         await CR._click_listo(page, add, "Add (depósito)")
 
-        await _confirmar_warning(page, RE_WARN_DEP)
-        await _cerrar_modal(page, RE_OK_DEP, "Depósito guardado")
+        await _resolver_guardado(page, RE_OK_DEP, "Depósito guardado")
 
         # Validación: 1ª fila con el monto y la nota (columnas 2 y 4).
         try:
@@ -223,8 +330,11 @@ async def agregar_otro_cargo(page, monto: str = MONTO_UNO, nota: str = NOTA) -> 
     """Pestaña Other Charges → Credit + memo type + monto + notas → Add."""
     logger.info("[Cobranza] Agregando otro cargo de $%s…", monto)
     try:
+        # CLAVE: si quedó un Warning abierto del paso anterior, este clic se
+        # colgaba los 120 s del timeout esperando detrás del modal.
+        await limpiar_modales(page)
         tab = page.get_by_role("tab", name="Other Charges", exact=True)
-        await CR._click_listo(page, tab, "Pestaña Other Charges")
+        await CR._click_listo(page, tab, "Pestaña Other Charges", timeout=45_000)
         panel = page.locator(OTHER_CHARGES_PANEL).first
 
         # El original marca Debit y luego Credit (queda Credit).
@@ -265,9 +375,10 @@ async def agregar_otro_cargo(page, monto: str = MONTO_UNO, nota: str = NOTA) -> 
         add = panel.locator("button").filter(has_text=RE_ADD).last
         await CR._click_listo(page, add, "Add (otro cargo)")
 
-        await _confirmar_warning(page, re.compile(r"same date and amount", re.I))
-        await _cerrar_modal(page, RE_OK_CHARGE, "Otro cargo guardado")
-        return True
+        # Si el guardado no se confirma, se devuelve False: el caso debe fallar
+        # ahí, con la pantalla del error a la vista, en vez de seguir como si
+        # el cargo se hubiera aplicado.
+        return await _resolver_guardado(page, RE_OK_CHARGE, "Otro cargo guardado")
     except Exception as e:
         logger.warning("[Cobranza] No se pudo agregar el otro cargo: %s", str(e)[:110])
         return False
@@ -285,6 +396,7 @@ async def validar_balance(page, nota: str = NOTA) -> dict:
     Devuelve {'balance': str, 'aplicado': str|None, 'ajustado': bool}.
     """
     balance_txt = ""
+    await limpiar_modales(page)
     try:
         campo = page.locator(COL_BALANCE).first
         await campo.wait_for(state="visible", timeout=TIMEOUT)
@@ -330,8 +442,7 @@ async def validar_balance(page, nota: str = NOTA) -> dict:
         await CR._click_listo(page, add, "Add (balance)")
         await page.wait_for_timeout(3_000)
 
-        await _confirmar_warning(page, RE_WARN_DEP, timeout_ms=5_000)
-        await _cerrar_modal(page, RE_OK_DEP, "Balance ajustado")
+        await _resolver_guardado(page, RE_OK_DEP, "Balance ajustado")
         return {"balance": balance_txt, "aplicado": final, "ajustado": True}
     except Exception as e:
         logger.warning("[Cobranza] No se pudo ajustar el balance: %s", str(e)[:110])

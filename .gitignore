@@ -22,3 +22,18 @@ reports/
 .vscode/
 .idea/
 gui/usuarios.json
+
+# Volcados de memoria (KRA-1527): pesados y con datos sensibles
+*.dmp
+*.DMP
+# Carpeta de volcados de la etiqueta KRA-1527: cientos de MB con datos
+# sensibles dentro. Se borra sola al terminar la corrida.
+reports/dumps/
+
+# Los volcados de KRA-1527 viven en reports/evidence/KRA-1527/VolcadoMemoriaDMP,
+# ya cubierto por `reports/` de arriba. No se añade ninguna negación a
+# propósito: reincluir un archivo dentro de una carpeta ignorada obliga a
+# desbloquear TODOS los niveles (`!reports/`, `!reports/evidence/`, …) y eso
+# arrastraría a git los reportes HTML y las capturas de cada corrida.
+# El README de esa carpeta lo escribe `memdump_helper` al crearla, así que la
+# explicación está donde hace falta sin versionar salida generada.

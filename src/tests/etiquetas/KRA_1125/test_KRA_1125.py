@@ -19,13 +19,15 @@ Nota sobre el telefono:
   Hay que verificar que el boton quedo enabled antes de continuar.
 
 COMO CORRER:
-    pytest src/tests/etiquetas -k KRA_1125 -v -s
+    pytest src/tests/etiquetas/KRA_1125 -v -s
+    pytest src/tests/etiquetas -k KRA_1125 -v -s      # también funciona
 """
 import os
 import random
 import pytest
 from playwright.async_api import Page
 
+from config import settings
 from config.logger import get_logger
 from src.pages.hm_transferelektra_page import HmTransferelektraPage
 from src.helpers.screenshot_helper import ScreenshotHelper
@@ -63,9 +65,12 @@ _SUMMARY_TESTID = "transfers-container-modal-summary-0-send-button"
 
 
 def _ev(n):
-    d = os.path.join(os.path.dirname(__file__), "..", "..", "..", "reports", "evidence", EVIDENCE)
-    os.makedirs(d, exist_ok=True)
-    return os.path.join(d, n)
+    # Ruta ANCLADA al proyecto, no relativa a este archivo: al mover el test a
+    # src/tests/etiquetas/KRA_1125/ los '..' contados a mano dejaban de cuadrar
+    # y las evidencias se escribían fuera del repo.
+    d = settings.EVIDENCE_DIR / EVIDENCE
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / n)
 
 
 async def _fill_documento_si_aparece(flow):

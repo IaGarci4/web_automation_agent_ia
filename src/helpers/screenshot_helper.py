@@ -38,15 +38,28 @@ class ScreenshotHelper:
 
     # ── Espera de "pantalla lista" ────────────────────────────────────────────
 
-    async def wait_ready(self, timeout: int = 10_000) -> None:
+    async def wait_ready(self, timeout: int = 4_000) -> None:
         """
         Espera a que la pantalla esté ESTABLE antes de capturar, para no
-        fotografiar un loader, una pantalla en blanco o un estado intermedio
-        antes de llegar a la pantalla objetivo. Verifica:
+        fotografiar un loader, una pantalla en blanco o un estado intermedio.
+        Verifica:
           1. document.readyState == 'complete'
-          2. que NO haya loader/overlay bloqueante visible
+          2. que NO haya loader bloqueante visible
           3. que el body tenga contenido real (no esté en blanco)
-        Best-effort: si algo no se cumple en `timeout`, captura igual.
+
+        ⏱️ EXCEPCIÓN IMPORTANTE — LOS MODALES.
+        Antes se esperaba también a que desapareciera `.p-component-overlay` /
+        `.p-dialog-mask-scrollblocker`. Pero esas capas son **la máscara de un
+        diálogo**: existen justamente cuando hay un modal en pantalla. Como
+        media etiqueta KRA-1527 fotografía modales (compliance, éxito,
+        cancelación, diálogo de impresión), cada captura agotaba el timeout
+        completo —10 s— esperando que se fuera algo que solo se va al cerrar el
+        modal… y capturaba igual al final. Diez segundos por foto, varias fotos
+        por caso.
+
+        Ahora, si hay un diálogo VISIBLE, la pantalla se considera lista: el
+        modal es el sujeto de la foto, no un estorbo. Y el timeout baja a 4 s:
+        si un overlay sigue ahí después de 4 s, esperar más no cambia nada.
         """
         try:
             await self.page.wait_for_load_state("domcontentloaded", timeout=timeout)
@@ -55,13 +68,25 @@ class ScreenshotHelper:
         script = """
         () => {
             if (document.readyState !== 'complete') return false;
-            // Loaders/overlays que no deben salir en la foto
-            const sels = ['#maxi-loader', '.p-component-overlay', '.p-dialog-mask-scrollblocker'];
+            const visible = (el) => {
+                const st = getComputedStyle(el);
+                return st.display !== 'none' && st.visibility !== 'hidden'
+                       && st.opacity !== '0';
+            };
+            // ¿Hay un modal en pantalla? Entonces ES lo que se quiere retratar.
+            const dialogos = ['div[role="dialog"]', '.p-dialog', '.modal.show',
+                              'p-dialog'];
+            for (const s of dialogos) {
+                for (const el of document.querySelectorAll(s)) {
+                    if (visible(el)) return true;
+                }
+            }
+            // Sin modal: no fotografiar un loader ni una máscara suelta.
+            const sels = ['#maxi-loader', '.p-component-overlay',
+                          '.p-dialog-mask-scrollblocker'];
             for (const s of sels) {
                 for (const el of document.querySelectorAll(s)) {
-                    const st = getComputedStyle(el);
-                    if (st.display !== 'none' && st.visibility !== 'hidden'
-                        && st.opacity !== '0') return false;
+                    if (visible(el)) return false;
                 }
             }
             // Pantalla no en blanco: hay texto visible suficiente

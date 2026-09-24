@@ -1,0 +1,3 @@
+.\trn239.ps1 → todo: preflight, los 8 casos, happy path, limpieza y abre reportes.
+.\trn239.ps1 CP03 → un solo caso (CP01…CP08), sin limpieza, para inspeccionar.
+.\trn239.ps1 limpiar → cancela lo que dejó la corrida.

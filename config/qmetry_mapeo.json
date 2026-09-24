@@ -1,0 +1,210 @@
+{
+  "_ayuda": [
+    "Mapeo de EVIDENCIAS del sanity → PASOS del caso en QMetry.",
+    "",
+    "Por cada CP:",
+    "  test_case : key del Test Case en QMetry (ej. BM-TC-4644).",
+    "  pasos     : { fragmento_del_nombre_de_la_imagen : numero_de_paso }.",
+    "              El fragmento se busca DENTRO del nombre del archivo, sin el",
+    "              prefijo numérico ni la extensión. Ej: la imagen",
+    "              '05_envio_continue.png' coincide con 'envio_continue'.",
+    "  resto     : qué hacer con las imágenes que no coincidan con ningún",
+    "              fragmento: 'ejecucion' (adjuntar al caso), 'omitir' o un",
+    "              número de paso.",
+    "",
+    "Los números de paso son el seqNo REAL del caso en QMetry (1..N). Para",
+    "verlos: python tools/qmetry_probe.py --solo-leer --caso BM-TC-XXXX"
+  ],
+  "CP01": {
+    "_nota": [
+      "TEST - H2 - CP01 Money Transfer Cash con KYC - Modificación - Recibo Windows",
+      "10 pasos. Las evidencias propias del test ya llevan el paso en el nombre",
+      "(Step01-, Step02-, Step03-); aquí se mapean las que vienen de módulos",
+      "COMPARTIDOS con CP02-CP04 (flujo_mt / cancelacion), que no pueden llevar",
+      "un número fijo porque cada CP los numera distinto.",
+      "Pasos del caso: 1 cliente+beneficiario · 2 pagador+monto>3000 · 3 info",
+      "adicional KYC · 4 Continuar (Pre Transfer) · 5 Modificar · 6 Continuar +",
+      "SI Enviar · 7 imprimir recibo Windows · 8 modificar beneficiario en",
+      "Reportes · 9 Chronos KYC Hold · 10 cancelar desde Chronos.",
+      "Los pasos 5, 7, 8 y 9 se marcan NA a propósito (fuera del alcance de la",
+      "automatización: modificación manual e impresión física)."
+    ],
+    "test_case": "BM-TC-5391",
+    "pasos": {
+      "envio_continue": 4,
+      "mensaje_info_adicional": 3,
+      "info_adicional_requerida": 3,
+      "envio_exitoso": 6
+    },
+    "na": [
+      5,
+      7,
+      8,
+      9
+    ],
+    "na_motivo": "No aplica en la ejecución automatizada: el proceso no usa impresora física ni digital, y la modificación manual del beneficiario queda fuera del alcance de la automatización.",
+    "resto": "ejecucion"
+  },
+  "CP02": {
+    "test_case": "BM-TC-4644",
+    "pasos": {
+      "cliente_beneficiario": 2,
+      "OFAC_monto": 3,
+      "mensaje_info_adicional": 3,
+      "info_adicional_requerida": 3,
+      "envio_continue": 5,
+      "envio_exitoso": 6,
+      "transaccion_encontrada": 10,
+      "cancelacion_exitosa": 10
+    },
+    "resto": "ejecucion"
+  },
+  "CP03": {
+    "_nota": "TEST - H2 - CP03 Money Transfer Deposito TDD, OFAC Beneficiario",
+    "test_case": "BM-TC-4645",
+    "pasos": {
+      "cliente_beneficiario": 2,
+      "deposito_cuenta": 3,
+      "cuestionario": 3,
+      "tarjeta_debito": 4,
+      "envio_continue": 5,
+      "envio_exitoso": 6,
+      "pos_tarjeta_debito": 7
+    },
+    "resto": "ejecucion"
+  },
+  "CP04": {
+    "_nota": "TEST - H2 - CP04 Money Transfer Doméstico, Multi Agente, OFAC",
+    "test_case": "BM-TC-4648",
+    "pasos": {
+      "cliente_beneficiario": 2,
+      "atm_monto": 3,
+      "envio_continue": 4,
+      "envio_exitoso": 5
+    },
+    "resto": "ejecucion"
+  },
+  "CP05": {
+    "_nota": "Bill Payment (Fidelity Express / Fiserv) — confirmar la key del caso",
+    "test_case": "",
+    "pasos": {
+      "bill_payment_loaded": 1,
+      "customer_loaded": 2,
+      "fidelity_form_filled": 3,
+      "fiserv_form_filled": 3,
+      "payment_confirmed": 4
+    },
+    "resto": "ejecucion"
+  },
+  "CP06": {
+    "_nota": "TEST - H2 - CP06 Recargas DTOne (Lunex / Top Ups)",
+    "test_case": "BM-TC-4670",
+    "pasos": {
+      "mega_abierto": 1,
+      "mega_numero_us": 2,
+      "mega_listo_para_enviar": 3,
+      "regular_abierto": 4,
+      "regular_beneficiario": 5,
+      "regular_monto": 6,
+      "regular_listo_para_enviar": 7
+    },
+    "resto": "ejecucion"
+  },
+  "CP07": {
+    "_nota": "Cheque individual (scan) + rechazo en Chronos — confirmar la key",
+    "test_case": "",
+    "pasos": {
+      "sesion_mono_agente": 1,
+      "pantalla_cheques_individuales": 2,
+      "cheque_escaneado": 3,
+      "datos_cheque_editados": 4,
+      "cheque_procesado": 5,
+      "proceso_finalizado": 6,
+      "reporte_verify_hold": 7,
+      "chronos_edited_checks": 8,
+      "chronos_issuer_check_number": 9,
+      "chronos_rechazo": 10
+    },
+    "resto": "ejecucion"
+  },
+  "CP09": {
+    "_nota": [
+      "TEST - H2 - CP09 Pagos en línea. El caso tiene 7 PASOS en QMetry:",
+      "1 Agent Monitor · 2 depósito · 3 otro cargo · 4 Collection · 5 balance ·",
+      "6 volver a Hermes · 7 pago en línea.",
+      "Antes esto mapeaba al paso 8 (inexistente) y esas imágenes se iban a la",
+      "ejecución en vez del paso."
+    ],
+    "test_case": "BM-TC-4652",
+    "pasos": {
+      "agent_monitor_agencia": 1,
+      "deposito_agregado": 2,
+      "otro_cargo_agregado": 3,
+      "collection_agencia": 4,
+      "balance_validado": 5,
+      "pagos_en_linea": 7,
+      "terminos_y_condiciones": 7,
+      "cuenta_seleccionada": 7,
+      "monto_a_pagar": 7,
+      "confirmacion_pago": 7,
+      "pago_final": 7
+    },
+    "resto": "ejecucion"
+  },
+  "CP10": {
+    "_nota": [
+      "TEST - H2 - CP10 Ficha de Depósitos. Son DOS pruebas (happy path y caso",
+      "alternativo) que comparten el mismo Test Case; sus evidencias ya llevan",
+      "el paso en el nombre (Step01-, Step02-…), así que aquí solo se mapea el",
+      "cierre en Chronos, común a las dos.",
+      "PENDIENTE: confirmar la key del Test Case en QMetry."
+    ],
+    "test_case": "",
+    "pasos": {
+      "chronos_recibo_digital": 4,
+      "recibo_eliminado": 4
+    },
+    "resto": "ejecucion"
+  },
+  "CP11": {
+    "_nota": [
+      "TEST - H2 - CP11 Fax de entrada y salida (multi-agencia).",
+      "Las evidencias ya llevan el paso en el nombre (Step01-…Step05-); aquí solo",
+      "se mapea el cierre por cancelación, común a los CP del sanity.",
+      "PENDIENTE: confirmar la key del Test Case en QMetry."
+    ],
+    "test_case": "",
+    "pasos": {
+      "transaccion_encontrada": 6,
+      "cancelacion_exitosa": 6
+    },
+    "resto": "ejecucion"
+  },
+  "CP12": {
+    "_nota": [
+      "TEST - H2 - CP12 Reportes de Balance. Son DOS pruebas que comparten el",
+      "Test Case: Balance Continuo (pasos 1-4) y Balance por Cajero (5-6).",
+      "Los pasos 7 y 8 son de IMPRESIÓN y se marcan NA: el proceso automatizado",
+      "no usa impresora física ni digital.",
+      "PENDIENTE: confirmar la key del Test Case en QMetry."
+    ],
+    "test_case": "",
+    "pasos": {},
+    "na": [
+      7,
+      8
+    ],
+    "na_motivo": "No aplica en la ejecución automatizada: el proceso no usa impresora física ni digital.",
+    "resto": "ejecucion"
+  },
+  "CP22": {
+    "_nota": [
+      "TEST - H2 - CP22 Generar Money Order con Información Adicional.",
+      "Las evidencias llevan el paso en el nombre (Step01-…Step07-).",
+      "PENDIENTE: confirmar la key del Test Case en QMetry."
+    ],
+    "test_case": "",
+    "pasos": {},
+    "resto": "ejecucion"
+  }
+}

@@ -51,9 +51,30 @@
           "home": false,
           "mobile": true,
           "atm": true
+        },
+        "BANCOPPEL": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
+        },
+        "SORIANA": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
+        },
+        "CHEDRAUI EFECTIVO": {
+          "cash": true,
+          "deposit": true,
+          "home": false,
+          "mobile": true,
+          "atm": true
         }
       }
     }
   },
-  "updated": "2026-08-21 11:15:40"
+  "updated": "2026-09-23 12:14:43"
 }

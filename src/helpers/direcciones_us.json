@@ -1,0 +1,431 @@
+{
+  "_meta": {
+    "descripcion": "Direcciones reales publicas/comerciales de EE.UU. por codigo postal, para el validador de Hermes.",
+    "fuente": "Curado a mano + verificado con US Census Geocoder",
+    "verificado": "2026-09-18",
+    "regla": "Solo direcciones publicas/comerciales. Nunca residenciales.",
+    "total_zips": 60
+  },
+  "direcciones": {
+    "10001": {
+      "direccion": "421 8th Ave",
+      "ciudad": "New York",
+      "estado": "NY",
+      "estado_nombre": "NEW YORK",
+      "landmark": "James A Farley Post Office / Moynihan Train Hall"
+    },
+    "10016": {
+      "direccion": "225 Madison Ave",
+      "ciudad": "New York",
+      "estado": "NY",
+      "estado_nombre": "NEW YORK",
+      "landmark": "The Morgan Library & Museum"
+    },
+    "11201": {
+      "direccion": "209 Joralemon St",
+      "ciudad": "Brooklyn",
+      "estado": "NY",
+      "estado_nombre": "NEW YORK",
+      "landmark": "Brooklyn Borough Hall"
+    },
+    "14202": {
+      "direccion": "65 Niagara Sq",
+      "ciudad": "Buffalo",
+      "estado": "NY",
+      "estado_nombre": "NEW YORK",
+      "landmark": "Buffalo City Hall"
+    },
+    "02108": {
+      "direccion": "45 School St",
+      "ciudad": "Boston",
+      "estado": "MA",
+      "estado_nombre": "MASSACHUSETTS",
+      "landmark": "Old City Hall (Boston)"
+    },
+    "19103": {
+      "direccion": "271 N 21st St",
+      "ciudad": "Philadelphia",
+      "estado": "PA",
+      "estado_nombre": "PENNSYLVANIA",
+      "landmark": "The Franklin Institute"
+    },
+    "15222": {
+      "direccion": "1000 Fort Duquesne Blvd",
+      "ciudad": "Pittsburgh",
+      "estado": "PA",
+      "estado_nombre": "PENNSYLVANIA",
+      "landmark": "David L Lawrence Convention Center"
+    },
+    "20001": {
+      "direccion": "801 Mt Vernon Pl NW",
+      "ciudad": "Washington",
+      "estado": "DC",
+      "estado_nombre": "DISTRICT OF COLUMBIA",
+      "landmark": "Walter E Washington Convention Center"
+    },
+    "21201": {
+      "direccion": "333 W Camden St",
+      "ciudad": "Baltimore",
+      "estado": "MD",
+      "estado_nombre": "MARYLAND",
+      "landmark": "Oriole Park at Camden Yards"
+    },
+    "23219": {
+      "direccion": "900 E Broad St",
+      "ciudad": "Richmond",
+      "estado": "VA",
+      "estado_nombre": "VIRGINIA",
+      "landmark": "Richmond City Hall"
+    },
+    "27601": {
+      "direccion": "500 S Salisbury St",
+      "ciudad": "Raleigh",
+      "estado": "NC",
+      "estado_nombre": "NORTH CAROLINA",
+      "landmark": "Raleigh Convention Center"
+    },
+    "28202": {
+      "direccion": "333 E Trade St",
+      "ciudad": "Charlotte",
+      "estado": "NC",
+      "estado_nombre": "NORTH CAROLINA",
+      "landmark": "Spectrum Center"
+    },
+    "29201": {
+      "direccion": "1100 Gervais St",
+      "ciudad": "Columbia",
+      "estado": "SC",
+      "estado_nombre": "SOUTH CAROLINA",
+      "landmark": "South Carolina State House"
+    },
+    "30303": {
+      "direccion": "55 Trinity Ave SW",
+      "ciudad": "Atlanta",
+      "estado": "GA",
+      "estado_nombre": "GEORGIA",
+      "landmark": "Atlanta City Hall"
+    },
+    "32202": {
+      "direccion": "117 W Duval St",
+      "ciudad": "Jacksonville",
+      "estado": "FL",
+      "estado_nombre": "FLORIDA",
+      "landmark": "Jacksonville City Hall"
+    },
+    "32801": {
+      "direccion": "400 S Orange Ave",
+      "ciudad": "Orlando",
+      "estado": "FL",
+      "estado_nombre": "FLORIDA",
+      "landmark": "Orlando City Hall"
+    },
+    "33130": {
+      "direccion": "73 W Flagler St",
+      "ciudad": "Miami",
+      "estado": "FL",
+      "estado_nombre": "FLORIDA",
+      "landmark": "Miami-Dade County Courthouse"
+    },
+    "33602": {
+      "direccion": "401 Channelside Dr",
+      "ciudad": "Tampa",
+      "estado": "FL",
+      "estado_nombre": "FLORIDA",
+      "landmark": "Amalie Arena"
+    },
+    "35203": {
+      "direccion": "710 20th St N",
+      "ciudad": "Birmingham",
+      "estado": "AL",
+      "estado_nombre": "ALABAMA",
+      "landmark": "Birmingham City Hall"
+    },
+    "37203": {
+      "direccion": "501 Broadway",
+      "ciudad": "Nashville",
+      "estado": "TN",
+      "estado_nombre": "TENNESSEE",
+      "landmark": "Bridgestone Arena"
+    },
+    "38103": {
+      "direccion": "125 N Main St",
+      "ciudad": "Memphis",
+      "estado": "TN",
+      "estado_nombre": "TENNESSEE",
+      "landmark": "Memphis City Hall"
+    },
+    "40202": {
+      "direccion": "800 W Main St",
+      "ciudad": "Louisville",
+      "estado": "KY",
+      "estado_nombre": "KENTUCKY",
+      "landmark": "Louisville Slugger Museum"
+    },
+    "43215": {
+      "direccion": "90 W Broad St",
+      "ciudad": "Columbus",
+      "estado": "OH",
+      "estado_nombre": "OHIO",
+      "landmark": "Columbus City Hall"
+    },
+    "45202": {
+      "direccion": "801 Plum St",
+      "ciudad": "Cincinnati",
+      "estado": "OH",
+      "estado_nombre": "OHIO",
+      "landmark": "Cincinnati City Hall"
+    },
+    "44114": {
+      "direccion": "601 Lakeside Ave E",
+      "ciudad": "Cleveland",
+      "estado": "OH",
+      "estado_nombre": "OHIO",
+      "landmark": "Cleveland City Hall"
+    },
+    "46204": {
+      "direccion": "200 W Washington St",
+      "ciudad": "Indianapolis",
+      "estado": "IN",
+      "estado_nombre": "INDIANA",
+      "landmark": "Indiana Statehouse"
+    },
+    "48226": {
+      "direccion": "2 Woodward Ave",
+      "ciudad": "Detroit",
+      "estado": "MI",
+      "estado_nombre": "MICHIGAN",
+      "landmark": "Coleman A Young Municipal Center"
+    },
+    "53202": {
+      "direccion": "700 N Art Museum Dr",
+      "ciudad": "Milwaukee",
+      "estado": "WI",
+      "estado_nombre": "WISCONSIN",
+      "landmark": "Milwaukee Art Museum"
+    },
+    "55401": {
+      "direccion": "704 S 2nd St",
+      "ciudad": "Minneapolis",
+      "estado": "MN",
+      "estado_nombre": "MINNESOTA",
+      "landmark": "Mill City Museum"
+    },
+    "60601": {
+      "direccion": "130 E Randolph St",
+      "ciudad": "Chicago",
+      "estado": "IL",
+      "estado_nombre": "ILLINOIS",
+      "landmark": "Prudential Plaza"
+    },
+    "60614": {
+      "direccion": "2001 N Clark St",
+      "ciudad": "Chicago",
+      "estado": "IL",
+      "estado_nombre": "ILLINOIS",
+      "landmark": "Lincoln Park Zoo"
+    },
+    "63101": {
+      "direccion": "815 Olive St",
+      "ciudad": "St. Louis",
+      "estado": "MO",
+      "estado_nombre": "MISSOURI",
+      "landmark": "Old Post Office (Custom House)"
+    },
+    "64106": {
+      "direccion": "414 E 12th St",
+      "ciudad": "Kansas City",
+      "estado": "MO",
+      "estado_nombre": "MISSOURI",
+      "landmark": "Kansas City City Hall"
+    },
+    "68102": {
+      "direccion": "455 N 10th St",
+      "ciudad": "Omaha",
+      "estado": "NE",
+      "estado_nombre": "NEBRASKA",
+      "landmark": "CHI Health Center Omaha"
+    },
+    "70112": {
+      "direccion": "1500 Sugar Bowl Dr",
+      "ciudad": "New Orleans",
+      "estado": "LA",
+      "estado_nombre": "LOUISIANA",
+      "landmark": "Caesars Superdome"
+    },
+    "73102": {
+      "direccion": "100 W Reno Ave",
+      "ciudad": "Oklahoma City",
+      "estado": "OK",
+      "estado_nombre": "OKLAHOMA",
+      "landmark": "Paycom Center"
+    },
+    "75201": {
+      "direccion": "1500 Marilla St",
+      "ciudad": "Dallas",
+      "estado": "TX",
+      "estado_nombre": "TEXAS",
+      "landmark": "Dallas City Hall"
+    },
+    "76102": {
+      "direccion": "1201 Houston St",
+      "ciudad": "Fort Worth",
+      "estado": "TX",
+      "estado_nombre": "TEXAS",
+      "landmark": "Fort Worth Convention Center"
+    },
+    "77002": {
+      "direccion": "901 Bagby St",
+      "ciudad": "Houston",
+      "estado": "TX",
+      "estado_nombre": "TEXAS",
+      "landmark": "Houston City Hall"
+    },
+    "78205": {
+      "direccion": "300 Alamo Plaza",
+      "ciudad": "San Antonio",
+      "estado": "TX",
+      "estado_nombre": "TEXAS",
+      "landmark": "The Alamo"
+    },
+    "78701": {
+      "direccion": "1100 Congress Ave",
+      "ciudad": "Austin",
+      "estado": "TX",
+      "estado_nombre": "TEXAS",
+      "landmark": "Texas State Capitol"
+    },
+    "79901": {
+      "direccion": "500 E San Antonio Ave",
+      "ciudad": "El Paso",
+      "estado": "TX",
+      "estado_nombre": "TEXAS",
+      "landmark": "El Paso County Courthouse"
+    },
+    "80202": {
+      "direccion": "1701 Wynkoop St",
+      "ciudad": "Denver",
+      "estado": "CO",
+      "estado_nombre": "COLORADO",
+      "landmark": "Union Station Denver"
+    },
+    "83702": {
+      "direccion": "150 N Capitol Blvd",
+      "ciudad": "Boise",
+      "estado": "ID",
+      "estado_nombre": "IDAHO",
+      "landmark": "Boise City Hall"
+    },
+    "84101": {
+      "direccion": "100 S West Temple",
+      "ciudad": "Salt Lake City",
+      "estado": "UT",
+      "estado_nombre": "UTAH",
+      "landmark": "Salt Palace Convention Center"
+    },
+    "85004": {
+      "direccion": "401 E Jefferson St",
+      "ciudad": "Phoenix",
+      "estado": "AZ",
+      "estado_nombre": "ARIZONA",
+      "landmark": "Chase Field"
+    },
+    "85701": {
+      "direccion": "260 S Church Ave",
+      "ciudad": "Tucson",
+      "estado": "AZ",
+      "estado_nombre": "ARIZONA",
+      "landmark": "Tucson Convention Center"
+    },
+    "87102": {
+      "direccion": "401 2nd St NW",
+      "ciudad": "Albuquerque",
+      "estado": "NM",
+      "estado_nombre": "NEW MEXICO",
+      "landmark": "Albuquerque Convention Center"
+    },
+    "89101": {
+      "direccion": "495 S Main St",
+      "ciudad": "Las Vegas",
+      "estado": "NV",
+      "estado_nombre": "NEVADA",
+      "landmark": "Las Vegas City Hall"
+    },
+    "90001": {
+      "direccion": "1610 E Florence Ave",
+      "ciudad": "Los Angeles",
+      "estado": "CA",
+      "estado_nombre": "CALIFORNIA",
+      "landmark": "LA Public Library - Florence Branch"
+    },
+    "90012": {
+      "direccion": "200 N Spring St",
+      "ciudad": "Los Angeles",
+      "estado": "CA",
+      "estado_nombre": "CALIFORNIA",
+      "landmark": "Los Angeles City Hall"
+    },
+    "90210": {
+      "direccion": "455 N Rexford Dr",
+      "ciudad": "Beverly Hills",
+      "estado": "CA",
+      "estado_nombre": "CALIFORNIA",
+      "landmark": "Beverly Hills City Hall"
+    },
+    "92101": {
+      "direccion": "910 N Harbor Dr",
+      "ciudad": "San Diego",
+      "estado": "CA",
+      "estado_nombre": "CALIFORNIA",
+      "landmark": "USS Midway Museum"
+    },
+    "93701": {
+      "direccion": "1101 E Belmont Ave",
+      "ciudad": "Fresno",
+      "estado": "CA",
+      "estado_nombre": "CALIFORNIA",
+      "landmark": "Columbia Elementary School"
+    },
+    "94102": {
+      "direccion": "1 Dr Carlton B Goodlett Pl",
+      "ciudad": "San Francisco",
+      "estado": "CA",
+      "estado_nombre": "CALIFORNIA",
+      "landmark": "San Francisco City Hall"
+    },
+    "95110": {
+      "direccion": "65 Cahill St",
+      "ciudad": "San Jose",
+      "estado": "CA",
+      "estado_nombre": "CALIFORNIA",
+      "landmark": "San Jose Diridon Station"
+    },
+    "95814": {
+      "direccion": "1315 10th St",
+      "ciudad": "Sacramento",
+      "estado": "CA",
+      "estado_nombre": "CALIFORNIA",
+      "landmark": "California State Capitol"
+    },
+    "97201": {
+      "direccion": "1825 SW Broadway",
+      "ciudad": "Portland",
+      "estado": "OR",
+      "estado_nombre": "OREGON",
+      "landmark": "Portland State University"
+    },
+    "98101": {
+      "direccion": "85 Pike St",
+      "ciudad": "Seattle",
+      "estado": "WA",
+      "estado_nombre": "WASHINGTON",
+      "landmark": "Pike Place Market"
+    },
+    "99201": {
+      "direccion": "720 W Mallon Ave",
+      "ciudad": "Spokane",
+      "estado": "WA",
+      "estado_nombre": "WASHINGTON",
+      "landmark": "Spokane Arena"
+    }
+  }
+}
