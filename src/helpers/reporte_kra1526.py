@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 from datetime import datetime
 
 from config.logger import get_logger
@@ -91,12 +92,23 @@ def _chip(veredicto: str) -> str:
             f'white-space:nowrap">{texto}</span>')
 
 
-def _tabla_pasos(pasos) -> str:
+def _rel(ev: str, base_dir) -> str:
+    """Ruta de evidencia RELATIVA a la carpeta del reporte, para que los enlaces
+    'ver' funcionen al compartir/mover la carpeta completa (no absoluta local)."""
+    if not ev or not base_dir:
+        return ev
+    try:
+        return os.path.relpath(ev, str(base_dir)).replace("\\", "/")
+    except Exception:
+        return ev
+
+
+def _tabla_pasos(pasos, base_dir=None) -> str:
     if not pasos:
         return ""
     filas = []
     for p in pasos:
-        ev = p.get("evidencia") or ""
+        ev = _rel(p.get("evidencia") or "", base_dir)
         enlace = (f'<a href="{_e(ev)}" style="color:#60a5fa">ver</a>'
                   if ev else "")
         filas.append(
@@ -131,7 +143,7 @@ def generar(P) -> str:
             <span class="caso-meta">{n_pasos} paso(s)</span>
           </summary>
           {f'<p class="sub">{_e(d.get("subticket"))}</p>' if d.get('subticket') else ''}
-          {_tabla_pasos(d.get('pasos'))}
+          {_tabla_pasos(d.get('pasos'), P.REPORTE.parent)}
           {f'<p class="notas">{_e(d.get("notas"))}</p>' if d.get('notas') else ''}
         </details>""")
 

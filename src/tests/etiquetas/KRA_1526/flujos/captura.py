@@ -19,6 +19,7 @@ variantes con `requests` usando el token capturado (dura ~20 min).
 
 from __future__ import annotations
 
+import os
 import re
 import urllib.parse
 
@@ -210,7 +211,8 @@ async def _capturar_reportes(page, base) -> None:
 
     NOTA: no navegamos a Reporte de transacciones aquí; CP06 usa su ruta (que ya
     responde 200 con el token capturado) y esa navegación colgaba la sesión."""
-    _RE_HOST = re.compile(r"maxilabs\.net", re.I)
+    # Host del API: TEST (maxilabs.net) y PROD (maxiagentes.net).
+    _RE_HOST = re.compile(r"maxilabs\.net|maxiagentes\.net", re.I)
     idagent = str(base.id_agent or "")
     cap = {"balance": None}
     resps = {}
@@ -459,9 +461,21 @@ async def capturar_baseline(perfil: str = "mono", agency: str = None) -> Baselin
                     except Exception:
                         base.resp_body = None
             logger.info("[Captura] Baseline: %s", base.resumen())
-            # CP05 (balance) y CP06 (money_transfers) se resuelven por API con el
-            # token de la sesión (contrato real conocido), así que NO navegamos a
-            # esos reportes en el navegador — más rápido y sin modales.
+            # CP06 (money_transfers) se resuelve por API con el token (ruta conocida).
+            # CP05 (balance) vive en un host de LAMBDAS: en TEST la ruta inferida
+            # funciona, pero en PROD ese host NO está documentado → hay que CAPTURAR
+            # el request real. Se hace aquí, en la MISMA sesión ya autenticada, para
+            # que CP05 sea 100% automático también en prod. Activable/desactivable con
+            # KRA1526_CAPTURA_BALANCE (default: ON en prod, OFF en test por velocidad).
+            _cap_bal = os.getenv("KRA1526_CAPTURA_BALANCE", "").strip().lower()
+            _hacer_balance = (_cap_bal in ("1", "true", "si", "sí", "yes")
+                              or (_cap_bal == "" and getattr(settings, "_ES_PROD", False)))
+            if _hacer_balance and not P.BALANCE_URL:
+                try:
+                    await _capturar_reportes(page, base)
+                except Exception as e:
+                    logger.warning("[Captura] Balance por cajero no capturado: %s",
+                                   str(e)[:120])
             return base
         finally:
             try:

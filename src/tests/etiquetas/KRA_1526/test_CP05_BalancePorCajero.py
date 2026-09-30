@@ -21,6 +21,7 @@ import re
 
 import pytest
 
+from config import settings
 from . import parametros as P
 from .flujos import idor_api as API
 
@@ -34,13 +35,25 @@ def _iduser_de_url(url: str) -> str:
 
 @pytest.mark.caso_kra1526(P.CP05, "Balance por Cajero rechaza un IdUser ajeno (403)")
 def test_CP05_balance_por_cajero(caso, baseline):
-    usa_url = bool(P.BALANCE_URL)
-    iduser_propio = _iduser_de_url(P.BALANCE_URL) if usa_url else baseline.id_user
+    # URL del balance, en orden: (1) la CAPTURADA en vivo en la misma sesión
+    # (baseline.extra['balance'] — automático, incluye el host real de PROD), o
+    # (2) la fijada con KRA1526_BALANCE_URL. En PRODUCCIÓN el host de lambdas no
+    # está documentado, así que la ruta inferida daría 401 (falsa falla): si NO
+    # hay ninguna de las dos, se OMITE (la seguridad IDOR ya la cubren CP01–04/06).
+    _cap = (getattr(baseline, "extra", None) or {}).get("balance") or {}
+    url_balance = P.BALANCE_URL or _cap.get("url") or ""
+    if getattr(settings, "_ES_PROD", False) and not url_balance:
+        pytest.skip("[PROD] No se capturó el request de balance_by_cashier ni se fijó "
+                    "KRA1526_BALANCE_URL. El host de lambdas de prod no está "
+                    "documentado; sin él responde 401. No es bug de producción.")
+    usa_url = bool(url_balance)
+    iduser_propio = _iduser_de_url(url_balance) if usa_url else baseline.id_user
 
     # ── 1) Happy path: balance con IDs propios → 200 ───────────────────────
     if usa_url:
-        propios = API.balance_por_cajero(baseline, None, None, url=P.BALANCE_URL)
-        caso.anotar("Endpoint fijado por KRA1526_BALANCE_URL (token fresco de sesión).")
+        propios = API.balance_por_cajero(baseline, None, None, url=url_balance)
+        caso.anotar("Endpoint del balance tomado de la CAPTURA en vivo (o de "
+                    "KRA1526_BALANCE_URL); token fresco de la sesión.")
     else:
         propios = API.balance_por_cajero(baseline, baseline.id_user, baseline.id_agent)
 
@@ -62,7 +75,7 @@ def test_CP05_balance_por_cajero(caso, baseline):
 
     # ── 2) IdUser ajeno → debe rechazar (403) sin datos ────────────────────
     if usa_url:
-        url_ajeno = API._sub_query(P.BALANCE_URL, "idUser", P.ID_USER_AJENO)
+        url_ajeno = API._sub_query(url_balance, "idUser", P.ID_USER_AJENO)
         ajeno = API.balance_por_cajero(baseline, None, None, url=url_ajeno)
     else:
         ajeno = API.balance_por_cajero(baseline, P.ID_USER_AJENO, baseline.id_agent)

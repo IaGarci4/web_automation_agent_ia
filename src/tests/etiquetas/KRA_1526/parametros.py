@@ -60,9 +60,13 @@ SUBTICKETS = {
 # ── API (TEST) ────────────────────────────────────────────────────────────────
 # El host REAL se toma del request capturado; este es el default/documental que
 # aparece en el reporte y el fallback si la captura no trae host.
-BASE_URL = os.getenv(
-    "KRA1526_BASE_URL",
-    "https://test-hermes-api-containers.maxilabs.net").rstrip("/")
+# Env-aware: TEST → api-containers de labs; PROD → api de maxiagentes. OJO: el
+# host REAL se toma del request CAPTURADO en vivo (con sesión prod+kerberos será
+# prod); esto es solo el default/fallback que ahora ya NO cae en test estando en
+# prod. Override manual con KRA1526_BASE_URL.
+BASE_URL = (os.getenv("KRA1526_BASE_URL") or settings.por_ambiente(
+    "https://test-hermes-api-containers.maxilabs.net",
+    os.getenv("KRA1526_PROD_BASE_URL", "https://hermes2-api.maxiagentes.net"))).rstrip("/")
 
 # Rutas de los endpoints que llevan IdUser / IdAgent (del análisis del 8-sep).
 # La búsqueda global se CAPTURA (no se hardcodea su ruta); estas dos son para la
@@ -71,8 +75,13 @@ RUTA_BUSQUEDA = os.getenv("KRA1526_RUTA_BUSQUEDA", "/api/bff/customer/search")
 # El balance por cajero vive en el host de LAMBDAS (no en api-containers) y su
 # header de auth se llama `authorizer` (JWT sin 'Bearer'). Confirmado con el
 # request real capturado en DevTools.
-BALANCE_HOST = os.getenv("KRA1526_BALANCE_HOST",
-                         "https://test-hermes-api-lambdas.maxilabs.net").rstrip("/")
+# Env-aware. El host de lambdas de PROD no está documentado, así que la captura
+# en vivo lo trae; el fallback prod es configurable con KRA1526_PROD_BALANCE_HOST
+# (default: el mismo host prod de la API). En TEST se queda igual.
+BALANCE_HOST = (os.getenv("KRA1526_BALANCE_HOST") or settings.por_ambiente(
+    "https://test-hermes-api-lambdas.maxilabs.net",
+    os.getenv("KRA1526_PROD_BALANCE_HOST",
+              "https://hermes2-api.maxiagentes.net"))).rstrip("/")
 RUTA_BALANCE_CAJERO = os.getenv("KRA1526_RUTA_BALANCE",
                                 "/api/reports/balance_by_cashier")
 # URL COMPLETA real del balance por cajero (host + path + query con IdUser e
