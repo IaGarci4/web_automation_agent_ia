@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
 from pathlib import Path
 
 from config import settings
@@ -87,7 +88,23 @@ def _guardar_cache(token: str, expiration) -> None:
 
 def obtener_token(forzar: bool = False) -> str:
     """Token de soporte vigente. '' si no se pudo obtener (BD no disponible o sin
-    fila vigente); el llamador decide si omitir el caso."""
+    fila vigente); el llamador decide si omitir el caso.
+
+    PRODUCCIÓN: NO se consulta la BD. El token se pasa MANUALMENTE por variable de
+    entorno (PROD_SUPPORT_TOKEN, o SUPPORT_TOKEN). Solo en TEST se consulta la BD.
+    """
+    if getattr(settings, "_ES_PROD", False):
+        tok = (os.getenv("PROD_SUPPORT_TOKEN")
+               or os.getenv("SUPPORT_TOKEN") or "").strip()
+        if tok:
+            logger.info("[Token] PRODUCCIÓN: token de soporte tomado de la variable "
+                        "de entorno (sin consulta a BD).")
+        else:
+            logger.warning("[Token] PRODUCCIÓN: no hay token en PROD_SUPPORT_TOKEN / "
+                           "SUPPORT_TOKEN — Soporte Remoto se omitirá. Defínelo con "
+                           "$env:PROD_SUPPORT_TOKEN=\"<token>\".")
+        return tok
+
     if not forzar:
         tok, exp = _leer_cache()
         if tok:

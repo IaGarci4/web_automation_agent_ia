@@ -394,15 +394,16 @@ async def logged_page(request):
                         await _flow.cambiar_idioma(lang)
                     except Exception:
                         pass
-                    # ── Soporte Remoto (INDISPENSABLE en el agente) ──────────
-                    # En el WebView2 la captura de pantalla sale NEGRA; el
-                    # Soporte Remoto habilita la pantalla. Se prepara AQUÍ, en el
-                    # arranque de Kerberos, para que CUALQUIER caso corra con la
-                    # pantalla ya habilitada. Best-effort: si ya está habilitado
-                    # (tooltip 'Token validated successfully') no se repite.
-                    if settings.SOPORTE_REMOTO and _os.getenv(
-                            "HERMES_AGENT_SOPORTE", "1").strip().lower() in (
-                            "1", "true", "si", "sí", "yes"):
+                    # ── Soporte Remoto (REGLA: KERBEROS = SOPORTE REMOTO) ────
+                    # SIEMPRE que Hermes abre por KERBEROS (esta rama CDP) se
+                    # aplica el Soporte Remoto — sin gates extra. En el WebView2 la
+                    # captura sale NEGRA y el Soporte Remoto habilita la pantalla,
+                    # así que TODO caso arranca con la pantalla lista. Sin kerberos
+                    # (web) esta rama no se ejecuta, así que NO hay soporte remoto.
+                    # El token: en TEST de la BD; en PROD de PROD_SUPPORT_TOKEN
+                    # (manual, sin BD). Best-effort e idempotente (si ya está
+                    # habilitado no se repite).
+                    if settings.SOPORTE_REMOTO:
                         try:
                             from src.helpers.token_support import obtener_token
                             tok = obtener_token()
@@ -411,9 +412,9 @@ async def logged_page(request):
                                 logger.info("[Agente-CDP] Soporte Remoto habilitado "
                                             "(pantalla lista).")
                             else:
-                                logger.warning("[Agente-CDP] Sin token de BD — NO se "
-                                               "habilitó el Soporte Remoto (la pantalla "
-                                               "seguirá en negro).")
+                                logger.warning("[Agente-CDP] Sin token — NO se habilitó "
+                                               "el Soporte Remoto (la pantalla seguirá en "
+                                               "negro). En PROD define $env:PROD_SUPPORT_TOKEN.")
                         except Exception as e:
                             logger.warning("[Agente-CDP] Soporte Remoto no aplicado: %s",
                                            str(e)[:120])

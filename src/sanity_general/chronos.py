@@ -85,12 +85,23 @@ def _norm_amount(txt: str) -> str:
 
 
 async def _click_listo(page, locator, desc: str, timeout: int = TIMEOUT):
-    """Espera visible + habilitado y hace click (sin force, como el original)."""
+    """Espera visible + HABILITADO y hace click, con PAUSA de asentamiento —
+    réplica de `_click_when_ready` del repo maduro. La pausa es clave: en Chronos
+    el menú/panel expande con animación; sin esperar, el clic siguiente caía sobre
+    un submenú aún colapsado y no navegaba (se quedaba en /home o se congelaba)."""
     await locator.wait_for(state="visible", timeout=timeout)
+    try:
+        from playwright.async_api import expect as _expect
+        await _expect(locator).to_be_enabled(timeout=timeout)
+    except Exception:
+        pass
     try:
         await locator.click(timeout=timeout)
     except Exception:
         await locator.click(force=True, timeout=15_000)
+    # Asentamiento: deja que el menú/panel termine de expandir/renderizar antes
+    # del siguiente clic (el repo maduro mete 500-1000 ms entre pasos).
+    await page.wait_for_timeout(700)
     logger.info("[Chronos] %s", desc)
 
 
@@ -550,8 +561,9 @@ async def ir_a_edited_checks(page) -> bool:
     #    no expande a tiempo, dejando el clic sin navegar (se queda en /home). La
     #    sesión ya es válida para el app, así que ir directo a la ruta funciona.
     try:
-        base = (page.url or "").split("/Frontend/")[0]
-        if base:
+        url_actual = page.url or ""
+        if "/Frontend/" in url_actual:      # solo aplica al Chronos de TEST
+            base = url_actual.split("/Frontend/")[0]
             destino = base + "/Frontend/processing/edited-checks"
             await page.goto(destino, wait_until="domcontentloaded", timeout=60_000)
             await page.wait_for_timeout(1_500)
