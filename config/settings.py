@@ -58,14 +58,28 @@ HERMES_BASE_URL = os.getenv("HERMES_BASE_URL") or por_ambiente(
 HERMES_TRANSACTIONS_URL = os.getenv("HERMES_TRANSACTIONS_URL") or por_ambiente(
     "https://test-hermes.maxilabs.net/reports/Transactions",
     "https://hermes.maxiagentes.net/reports/Transactions")
+# SSO / token (realm Agents) y API de Hermes — cambian por ambiente (valores del
+# repo QA viejo settings_test.py / settings_prod.py). Se pueden sobrescribir por
+# env. Los usan flujos de API (etiquetas); el sanity no los necesita.
+HERMES_TOKEN_URL = os.getenv("HERMES_TOKEN_URL") or por_ambiente(
+    "https://sso.maxilabs.net/auth/realms/Agents/protocol/openid-connect/token",
+    "https://ssoqa.mylabs.mx/auth/realms/Agents/protocol/openid-connect/token")
+HERMES_API_URL = os.getenv("HERMES_API_URL") or por_ambiente(
+    "https://test-hermes-api-lambdas.maxilabs.net/api",
+    "https://hermes-api-qa.mylabs.mx/api")
 
 # ── Chronos (back office) ───────────────────────────────────────────────────
-CHRONOS_URL = os.getenv("CHRONOS_URL") or por_ambiente(
-    "https://test-apps.maxilabs.net/Chronos/Frontend/home",
-    "https://corporateapp.maxiagentes.net/application/home")
+# PER-AMBIENTE PRIMERO (igual que el usuario mono/multi): en TEST usa CHRONOS_URL
+# (o el default test); en PROD usa PROD_CHRONOS_URL (o corporateapp). Antes el
+# genérico CHRONOS_URL tenía prioridad y, fijo en el .env a test, abría Chronos
+# TEST aun con HERMES_ENV=prod.
+CHRONOS_URL = por_ambiente(
+    os.getenv("CHRONOS_URL") or "https://test-apps.maxilabs.net/Chronos/Frontend/home",
+    os.getenv("PROD_CHRONOS_URL") or "https://corporateapp.maxiagentes.net/application/home")
 # Patrón de URL que confirma que Chronos cargó (para wait_for_url tras el login).
-CHRONOS_READY_URL = os.getenv("CHRONOS_READY_URL") or por_ambiente(
-    "**/Chronos/Frontend/home*", "**/application/home*")
+CHRONOS_READY_URL = por_ambiente(
+    os.getenv("CHRONOS_READY_URL") or "**/Chronos/Frontend/home*",
+    os.getenv("PROD_CHRONOS_READY_URL") or "**/application/home*")
 # ── Login de Chronos: CAMBIA POR AMBIENTE ───────────────────────────────────
 #   TEST → formulario propio de Keycloak: usuario + contraseña (sin 2FA).
 #   PROD → SSO de Google: correo Maxi + contraseña de Gmail + 2FA en el celular.
@@ -313,9 +327,40 @@ _agent_cdp_raw = os.getenv("HERMES_AGENT_CDP", "").strip()
 AGENT_CDP = bool(_agent_cdp_raw) and _agent_cdp_raw.lower() not in ("0", "false", "no")
 if _agent_cdp_raw.lower().startswith("http"):
     AGENT_CDP_URL = _agent_cdp_raw
+
+# ── Soporte Remoto (¿se aplica?) — UN SOLO INTERRUPTOR PARA TODO EL PROYECTO ──
+# El Soporte Remoto SOLO hace falta en el WebView2 del agente (kerberos): ahí la
+# pantalla sale negra y el token la habilita. En navegador web NO aporta (y no
+# hay que consultar el token en BD). Se resuelve central para no tocar cada test:
+#   • Por defecto = ON solo en modo AGENTE (AGENT_CDP), que es por donde corre
+#     kerberos/prod. En web (sin AGENT_CDP) = OFF.
+#   • Se puede FORZAR por ambiente/preferencia con HERMES_SOPORTE_REMOTO=1/0.
+# Así, con solo cambiar el modo (o esta env), se activa/desactiva en todo el flujo.
+_sr_raw = os.getenv("HERMES_SOPORTE_REMOTO", "").strip().lower()
+if _sr_raw in ("1", "true", "si", "sí", "yes", "on"):
+    SOPORTE_REMOTO = True
+elif _sr_raw in ("0", "false", "no", "off"):
+    SOPORTE_REMOTO = False
+else:
+    SOPORTE_REMOTO = AGENT_CDP     # default: solo kerberos (agente)
+
 # Patrón de la página objetivo dentro del WebView2 (la web app real).
 AGENT_PAGE_URL_RE = os.getenv(
     "HERMES_AGENT_PAGE_RE", r"test-hermes\.maxilabs\.net|/transfers")
+# .bat que lanza el Hermes2Agent con el puerto CDP abierto. Si el puerto no
+# responde, la fixture lo arranca sola con este .bat. Se busca: env
+# HERMES_AGENT_BAT → Desktop → tools/ del repo.
+def _buscar_agent_bat() -> str:
+    cand = [os.getenv("HERMES_AGENT_BAT", "").strip(),
+            str(Path.home() / "Desktop" / "Ejecutar_Hermes2Agent.bat"),
+            str(PROJECT_ROOT / "tools" / "Ejecutar_Hermes2Agent.bat")]
+    for c in cand:
+        if c and Path(c).exists():
+            return c
+    return cand[0] or str(PROJECT_ROOT / "tools" / "Ejecutar_Hermes2Agent.bat")
+AGENT_BAT = _buscar_agent_bat()
+# Segundos máximos a esperar a que el puerto CDP responda tras lanzar el agente.
+AGENT_START_TIMEOUT = int(os.getenv("HERMES_AGENT_START_TIMEOUT", "90"))
 
 # ── Rutas de salida ─────────────────────────────────────────────────────────
 REPORTS_DIR  = PROJECT_ROOT / "reports"
@@ -329,13 +374,61 @@ DIAG_DIR     = REPORTS_DIR / "diag"     # reportes de error (consola/HTTP/cURL)
 SESSION_DIR   = PROJECT_ROOT / "session_state"
 STORAGE_STATE = SESSION_DIR / f"{PORTAL_NAME}_storage_state.json"
 
+# ── Ejecución EN PARALELO por USUARIOS (pytest-xdist) ───────────────────────
+# Para correr 3–4 navegadores a la vez sin multisesión con un mismo usuario,
+# cada worker de xdist usa un USUARIO DISTINTO y su PROPIA sesión guardada.
+# El mapeo worker→credenciales sale del .env (mismas variables del repo viejo):
+#   gw0 → MAXI_USER / PROD_MAXI_USER
+#   gw1 → MAXI_USER_2 / PROD_MAXI_USER_2
+#   gw2 → MAXI_USER_3 / PROD_MAXI_USER_3
+#   gw3 → MAXI_USER_4 / PROD_MAXI_USER_4
+# (la contraseña es común: MAXI_PSWD / PROD_MAXI_PSWD = PORTAL_PASS).
+_WORKER_USER_ENV = {
+    "gw0": ("MAXI_USER",   "PROD_MAXI_USER"),
+    "gw1": ("MAXI_USER_2", "PROD_MAXI_USER_2"),
+    "gw2": ("MAXI_USER_3", "PROD_MAXI_USER_3"),
+    "gw3": ("MAXI_USER_4", "PROD_MAXI_USER_4"),
+}
+
+
+def usuario_por_worker(worker_id: str = "gw0"):
+    """Devuelve (usuario, contraseña) para un worker de xdist.
+
+    - gw0 (o corrida sin xdist): respeta PORTAL_USER/PORTAL_PASS si están puestos
+      en el .env (compatibilidad con la corrida de un solo navegador); si no,
+      cae a MAXI_USER/PROD_MAXI_USER según el ambiente.
+    - gw1..gw3: usan MAXI_USER_2/3/4 (o PROD_*), para que cada navegador entre con
+      un usuario propio y NO haya multisesión.
+    La contraseña es común (PORTAL_PASS = MAXI_PSWD / PROD_MAXI_PSWD)."""
+    if worker_id in ("gw0", "master", "") and os.getenv("PORTAL_USER"):
+        return PORTAL_USER, PORTAL_PASS
+    envs = _WORKER_USER_ENV.get(worker_id, _WORKER_USER_ENV["gw0"])
+    user = por_ambiente(os.getenv(envs[0], ""), os.getenv(envs[1], "")) or PORTAL_USER
+    return user, PORTAL_PASS
+
+
+def storage_state_por_worker(worker_id: str = "gw0"):
+    """Archivo de sesión propio de cada worker (para no pisar sesiones entre sí)."""
+    return SESSION_DIR / f"{PORTAL_NAME}_storage_state_{worker_id}.json"
+
 # ── Multi-agente (usuario que opera VARIAS agencias) ────────────────────────
 # Usuario/clave del perfil multiagente (para CPs como CP04). Sesión guardada en
 # archivo APARTE para no pisar la sesión mono. AGENCY_CODE = agencia a operar.
-PORTAL_USER_MULTI = (os.getenv("PORTAL_USER_MULTI")
-                     or por_ambiente(os.getenv("MAXI_USER_M", ""),
-                                     os.getenv("PROD_MAXI_USER_M", "")))
-PORTAL_PASS_MULTI = (os.getenv("PORTAL_PASS_MULTI")
+# IMPORTANTE: se resuelve POR AMBIENTE PRIMERO (igual que el usuario mono, ver
+# usuario_por_worker): TEST → MAXI_USER_M, PROD → PROD_MAXI_USER_M. El genérico
+# PORTAL_USER_MULTI queda SOLO como último recurso — antes tenía prioridad y por
+# eso en prod se colaba el usuario de test (igarciah2m) en vez de PROD_MAXI_USER_M.
+PORTAL_USER_MULTI = (por_ambiente(os.getenv("MAXI_USER_M", ""),
+                                  os.getenv("PROD_MAXI_USER_M", ""))
+                     or os.getenv("PORTAL_USER_MULTI", ""))
+# Password del multiagente, en orden de prioridad:
+#   1) per-ambiente dedicada del multi: MAXI_PSWD_M / PROD_MAXI_PSWD_M (si se definen)
+#   2) PORTAL_PASS_MULTI común (p.ej. la clave especial del multi de TEST)
+#   3) la clave del MONO por ambiente: MAXI_PSWD (test) / PROD_MAXI_PSWD (prod)
+# En PROD el multi usa PROD_MAXI_PSWD (paso 3) salvo que se fije una dedicada.
+PORTAL_PASS_MULTI = (por_ambiente(os.getenv("MAXI_PSWD_M", ""),
+                                  os.getenv("PROD_MAXI_PSWD_M", ""))
+                     or os.getenv("PORTAL_PASS_MULTI", "")
                      or por_ambiente(os.getenv("MAXI_PSWD", ""),
                                      os.getenv("PROD_MAXI_PSWD", "")))
 AGENCY_CODE         = AGENCY_CODE_ENV     # 0040-OK (test) · 0020-TX (prod)

@@ -51,6 +51,10 @@ BRANCH = os.getenv("CP11_BRANCH") or settings.por_ambiente("143", "143456789")
 
 AGENCY_CODE = os.getenv("CP11_AGENCY", settings.AGENCY_CODE)
 FAX = os.getenv("CP11_FAX", settings.AGENCY_FAX)
+# Teléfono del CLIENTE en PRODUCCIÓN: número FIJO ASIGNADO (bloque ficticio NANP
+# 555-01NN) para que el SMS del recibo llegue a un buzón controlado. En TEST se
+# ignora y se usa el aleatorio de siempre. Override puntual: CP11_PROD_PHONE.
+PROD_PHONE = os.getenv("CP11_PROD_PHONE", "5550100024")
 
 COMPLETAR = os.getenv("COMPLETAR_ENVIO", "1").strip().lower() in ("1", "true", "si", "yes")
 CANCELAR = os.getenv("CP11_CANCELAR", "1").strip().lower() in ("1", "true", "si", "yes")
@@ -107,7 +111,7 @@ async def test_CP11_fax_entrada_salida(logged_page_multi: Page, language,
     benef_phone = "".join(str(random.randint(0, 9)) for _ in range(10))
     await F.llenar_formulario_completo(
         flow, datos, dict(CFG_HOME), PAIS, CIUDAD, ESTADO, monto=MONTO,
-        tipo=TIPO_ENVIO, benef_phone=benef_phone)
+        tipo=TIPO_ENVIO, benef_phone=benef_phone, customer_phone=PROD_PHONE)
 
     cliente = datos.nombre_cliente()
     logger.info("[CP11] Cliente del envío: %s", cliente)

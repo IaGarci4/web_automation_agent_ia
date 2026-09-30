@@ -128,6 +128,26 @@ class HmTransferelektraPage(BasePage):
     _SOPORTE_ITEM_TESTID = "remoteSupport-0-navbar-dropdown-item"
     _SOPORTE_INPUT_TESTID = "input-field-input"
 
+    async def _soporte_remoto_ya_habilitado(self, timeout_ms: int = 1_500) -> bool:
+        """True si el soporte remoto YA está validado en esta sesión.
+
+        Se detecta por el tooltip/toast de éxito 'Token validated successfully'
+        (ES: 'Token validado correctamente'). Si está visible, el token ya se
+        aplicó y no hace falta repetir el flujo."""
+        import re as _re
+        pat = _re.compile(
+            r"token\s+validated\s+successfully|token\s+validad[oa]", _re.I)
+        espera = 0
+        while espera <= timeout_ms:
+            try:
+                if await self.page.get_by_text(pat).first.is_visible():
+                    return True
+            except Exception:
+                pass
+            await self.page.wait_for_timeout(250)
+            espera += 250
+        return False
+
     async def aplicar_soporte_remoto(self, token: str) -> bool:
         """Aplica el token de Soporte Remoto en el Hermes2Agent.
 
@@ -138,10 +158,24 @@ class HmTransferelektraPage(BasePage):
           4. Clic en 'Continuar' / 'Continue' (botón habilitado).
         Devuelve True si completó los pasos. Reutiliza el POM (smart_click)."""
         import re as _re
+        # Soporte Remoto SOLO aplica en el WebView2 del agente (kerberos/CDP):
+        # ahí la pantalla sale negra y el token la habilita. En navegador web
+        # normal no aporta nada, así que se omite (evita clicks y esperas inútiles).
+        from config import settings as _settings
+        if not getattr(_settings, "SOPORTE_REMOTO", False):
+            logger.info("aplicar_soporte_remoto: SOPORTE_REMOTO=OFF (web/no-kerberos) — se OMITE.")
+            return False
         logger.info("aplicar_soporte_remoto: token=%s", token)
         if not token:
             logger.warning("aplicar_soporte_remoto: token vacío — nada que aplicar.")
             return False
+
+        # Si el soporte remoto YA está habilitado (el tooltip 'Token validated
+        # successfully' está en pantalla), no hay que reaplicarlo: se responde OK.
+        if await self._soporte_remoto_ya_habilitado():
+            logger.info("aplicar_soporte_remoto: soporte remoto ya habilitado "
+                        "(tooltip 'Token validated successfully') — se omite.")
+            return True
 
         item = self.page.get_by_test_id(self._SOPORTE_ITEM_TESTID).first
 
@@ -795,6 +829,70 @@ class HmTransferelektraPage(BasePage):
         logger.info(f"fill_transfer_payers_money_info_city_0_cash_dropdown_input: {transfer_payers_money_info_city_0_cash_dropdown_input}")
         await self.select_typeahead(HmTransferelektraLocators.TRANSFER_PAYERS_MONEY_INFO_CITY_0_CASH_DROPDOWN_INPUT, transfer_payers_money_info_city_0_cash_dropdown_input)
 
+    async def seleccionar_ciudad_cash_por_texto(self, stem: str, contiene: str,
+                                                timeout: int = 12_000) -> bool:
+        """Ciudad del pagador (cash) para ciudades HOMÓNIMAS: teclea solo `stem`
+        (ej. 'OCOTLAN') y CLICKEA la opción VISIBLE cuyo texto contenga `contiene`
+        (ej. 'JALISCO' → 'OCOTLAN, JALISCO, MEXICO'). Evita el ArrowDown+Enter que
+        elige la primera (OAXACA) y deja el panel abierto. Cierra el panel al final.
+        Devuelve True si seleccionó una opción."""
+        import time as _t
+        test_id = HmTransferelektraLocators.TRANSFER_PAYERS_MONEY_INFO_CITY_0_CASH_DROPDOWN_INPUT
+        logger.info("seleccionar_ciudad_cash_por_texto: stem='%s' contiene='%s'",
+                    stem, contiene)
+        field = self.page.get_by_test_id(test_id).first
+        try:
+            await field.click(force=True, timeout=6_000)
+        except Exception:
+            pass
+        # Teclear SOLO el nombre base (sin estado) para que el dropdown liste las
+        # homónimas.
+        try:
+            await field.fill("", timeout=3_000)
+            await field.fill(stem, timeout=3_000)
+        except Exception:
+            try:
+                await self.page.keyboard.type(stem, delay=25)
+            except Exception:
+                pass
+
+        # Las opciones de ESTE dropdown NO son <li role=option>/.p-dropdown-item:
+        # se renderizan como filas de TEXTO. Se localiza por TEXTO VISIBLE una que
+        # contenga el nombre base Y el estado (ej. 'OCOTLAN' + 'JALISCO'), en ese
+        # orden, y se le da clic — así se descarta 'OCOTLAN, OAXACA' y
+        # 'SANTA CRUZ XOXOCOTLAN'.
+        patron = re.compile(
+            rf"\b{re.escape(stem.strip())}\b.*{re.escape(contiene.strip())}", re.I)
+        deadline = _t.monotonic() + timeout / 1000
+        while _t.monotonic() < deadline:
+            try:
+                cand = self.page.get_by_text(patron)
+                n = await cand.count()
+            except Exception:
+                n = 0
+            for i in range(min(n, 25)):
+                o = cand.nth(i)
+                try:
+                    if not await o.is_visible():
+                        continue
+                    txt = (await o.inner_text() or "").strip()
+                    await o.click(timeout=3_000)
+                    logger.info("✓ ciudad cash por texto visible: '%s'",
+                                " ".join(txt.split())[:60])
+                    await self.page.wait_for_timeout(400)
+                    return True
+                except Exception:
+                    continue
+            await self.page.wait_for_timeout(250)
+
+        logger.warning("seleccionar_ciudad_cash_por_texto: no hallé opción '%s' que "
+                       "contenga '%s' — cierro panel y sigo.", stem, contiene)
+        try:
+            await self.page.keyboard.press("Escape")
+        except Exception:
+            pass
+        return False
+
     # Tabs de TIPO de envío (sección Transfer). El testid es estable por índice:
     # transfer-payers-0-tab-title-{0..4}. Cash=0 (default/activo), Deposit=1,
     # Domicilio/Home=2, Móvil/Mobile=3, ATM=4.
@@ -933,15 +1031,24 @@ class HmTransferelektraPage(BasePage):
                     return
             except Exception:
                 pass
-            await btn.scroll_into_view_if_needed(timeout=1_500)
-            await btn.click(force=True, timeout=4_000)
-            await self.page.wait_for_timeout(300)
             op = opcion or _r.choice([1, 2])
             item = self.page.get_by_test_id(
                 f"transfer-payers-money-info-account-number-0-deposit-{op}-list-item").first
-            await item.wait_for(state="visible", timeout=3_000)
-            await item.click(force=True, timeout=3_000)
-            logger.info(f"account type: opción {op} ({'Cheques' if op == 1 else 'Ahorros'})")
+            # Reintenta abrir el dropdown: a veces el primer click no lo despliega
+            # y el list-item queda 'hidden' → 'Account Type required' bloquea Accept.
+            for intento in range(1, 4):
+                try:
+                    await btn.scroll_into_view_if_needed(timeout=1_500)
+                    await btn.click(force=True, timeout=4_000)
+                    await self.page.wait_for_timeout(450)
+                    await item.wait_for(state="visible", timeout=3_000)
+                    await item.click(force=True, timeout=3_000)
+                    logger.info("account type: opción %d (%s) — intento %d",
+                                op, "Cheques" if op == 1 else "Ahorros", intento)
+                    return
+                except Exception:
+                    await self.page.wait_for_timeout(400)
+            logger.warning("account type: no se pudo seleccionar tras 3 intentos — se omite.")
         except Exception as e:
             logger.warning(f"account type: no se pudo seleccionar ({e}) — se omite.")
 

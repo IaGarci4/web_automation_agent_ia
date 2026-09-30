@@ -389,26 +389,65 @@ def texto_del_pdf(ruta: str) -> str:
 
 
 async def mensaje_vacio_cajero(page) -> str:
-    """Texto del estado vacío de Balance por Cajero ('' si no aparece)."""
-    try:
-        loc = page.locator(CAJERO_MENSAJE_VACIO).first
-        await loc.wait_for(state="visible", timeout=TIMEOUT)
-        texto = (await loc.inner_text() or "").strip()
-        logger.info("[Balance] Estado inicial por cajero: '%s'", texto[:70])
-        return texto
-    except Exception:
-        logger.warning("[Balance] No apareció el mensaje de estado vacío.")
-        return ""
+    """Texto del estado vacío de Balance por Cajero ('' si no aparece).
+
+    El heading `.h4-heading` puede tardar en pintar y hay VARIOS en la pantalla
+    (algunos ocultos), así que `.first` podía quedarse esperando uno invisible.
+    Se SONDEA ~20s y se devuelve el texto del PRIMER heading VISIBLE con texto,
+    probando además variantes del contenedor del mensaje de estado."""
+    sels = [
+        CAJERO_MENSAJE_VACIO,                       # ".h4-heading"
+        "[data-testid*='h4-heading']",
+        ".empty-state, .no-data, .no-results",
+        "h4, .h4",
+    ]
+    espera = 0
+    while espera < 20_000:
+        for sel in sels:
+            try:
+                loc = page.locator(sel)
+                n = min(await loc.count(), 8)
+                for i in range(n):
+                    el = loc.nth(i)
+                    if await el.is_visible():
+                        texto = (await el.inner_text() or "").strip()
+                        if texto:
+                            logger.info("[Balance] Estado inicial por cajero: '%s'", texto[:70])
+                            return texto
+            except Exception:
+                pass
+        await page.wait_for_timeout(1_000)
+        espera += 1_000
+    logger.warning("[Balance] No apareció el mensaje de estado vacío (~20s).")
+    return ""
 
 
 async def buscar_por_cajero(page) -> bool:
-    """Pulsa Buscar en Balance por Cajero y espera el resultado."""
+    """Pulsa Buscar en Balance por Cajero y espera el resultado.
+
+    El botón puede tardar en renderizar/habilitarse y a veces queda fuera de la
+    vista, así que se SONDEA hasta ~25s (visible + habilitado + scroll) antes de
+    clickear, en vez de un click directo que se agotaba a los 15s."""
     try:
-        await page.get_by_test_id(CAJERO_BTN_BUSCAR).first.click(force=True,
-                                                                 timeout=TIMEOUT)
-        logger.info("[Balance] Búsqueda por cajero lanzada.")
-        await page.wait_for_timeout(10_000)     # el reporte tarda en poblarse
-        return True
-    except Exception as e:
-        logger.warning("[Balance] No se pudo buscar por cajero: %s", str(e)[:100])
-        return False
+        await _cerrar_warning(page)     # el aviso de salida come el clic
+    except Exception:
+        pass
+    btn = page.get_by_test_id(CAJERO_BTN_BUSCAR).first
+    espera = 0
+    while espera < 25_000:
+        try:
+            if await btn.count() and await btn.is_visible() and await btn.is_enabled():
+                try:
+                    await btn.scroll_into_view_if_needed(timeout=2_000)
+                except Exception:
+                    pass
+                await btn.click(force=True, timeout=5_000)
+                logger.info("[Balance] Búsqueda por cajero lanzada.")
+                await page.wait_for_timeout(8_000)   # el reporte tarda en poblarse
+                return True
+        except Exception:
+            pass
+        await page.wait_for_timeout(1_000)
+        espera += 1_000
+    logger.warning("[Balance] El botón 'Buscar' por cajero no estuvo listo (~25s).")
+    return False

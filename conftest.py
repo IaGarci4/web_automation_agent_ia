@@ -19,6 +19,37 @@ from config.logger import get_logger
 logger = get_logger("conftest")
 
 
+# ── Cronómetro de la sesión completa (tiempo TOTAL del sanity en el log) ─────
+_SESION_T0 = {}
+
+
+def pytest_sessionstart(session):
+    """Marca el inicio de la corrida. Solo en el proceso controlador (no en cada
+    worker de xdist) para no duplicar el total."""
+    import time as _t
+    if not hasattr(session.config, "workerinput"):   # controlador, no worker
+        _SESION_T0["t0"] = _t.time()
+        logger.info("[TIEMPO] ⏱ Inicio de la corrida.")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Al terminar TODA la corrida, escribe el tiempo total en el log y avisa si
+    superó el umbral de 30 min (objetivo del paralelo)."""
+    import time as _t
+    if hasattr(session.config, "workerinput"):
+        return                                        # es un worker → no reporta
+    t0 = _SESION_T0.get("t0")
+    if not t0:
+        return
+    seg = _t.time() - t0
+    m, s = divmod(int(seg), 60)
+    umbral = 30 * 60
+    marca = "✅ dentro de 30 min" if seg <= umbral else "⚠ MÁS de 30 min (revisar)"
+    logger.info("=" * 60)
+    logger.info("[TIEMPO] ⏱ Sanity COMPLETO en %dm %02ds (%.1fs) — %s", m, s, seg, marca)
+    logger.info("=" * 60)
+
+
 # ── Evidencias → QMetry (al terminar cada caso del sanity) ──────────────────
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -182,6 +213,59 @@ async def _nuevo_contexto(pw, usar_sesion: bool, storage_path=None,
     return navegador, contexto
 
 
+def _cdp_responde(timeout: float = 2.0) -> bool:
+    """True si el endpoint CDP del agente responde (puerto abierto)."""
+    import urllib.request
+    try:
+        url = settings.AGENT_CDP_URL.rstrip("/") + "/json/version"
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+async def _asegurar_agente_iniciado() -> bool:
+    """Verifica si el Hermes2Agent está corriendo (puerto CDP abierto). Si no, lo
+    ARRANCA con el .bat configurado y espera a que el puerto responda.
+
+    Devuelve True si el puerto quedó disponible. OJO: arrancar el agente NO hace
+    el login Kerberos ni abre la app — eso sigue siendo manual la 1ª vez; esto
+    solo evita tener que lanzar el .bat a mano cuando el agente está cerrado."""
+    import asyncio as _asyncio
+    from pathlib import Path as _Path
+    if _cdp_responde():
+        logger.info("[Agente-CDP] Hermes2Agent ya está corriendo (puerto CDP OK).")
+        return True
+
+    bat = settings.AGENT_BAT
+    if not bat or not _Path(bat).exists():
+        logger.warning("[Agente-CDP] Puerto CDP cerrado y no encontré el .bat "
+                       "(define HERMES_AGENT_BAT). No puedo auto-arrancar el agente.")
+        return False
+
+    logger.info("[Agente-CDP] Hermes2Agent no responde — arrancándolo con: %s", bat)
+    try:
+        import subprocess
+        # 'start' abre el .bat en su propia ventana sin bloquear la corrida.
+        subprocess.Popen(["cmd", "/c", "start", "", bat],
+                         creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    except Exception as e:
+        logger.warning("[Agente-CDP] No se pudo lanzar el .bat: %s", str(e)[:120])
+        return False
+
+    espera = 0
+    while espera < settings.AGENT_START_TIMEOUT:
+        if _cdp_responde():
+            logger.info("[Agente-CDP] Puerto CDP disponible tras %ds.", espera)
+            return True
+        await _asyncio.sleep(2)
+        espera += 2
+    logger.warning("[Agente-CDP] El puerto CDP no respondió tras %ds. Inicia sesión "
+                   "(Kerberos) y abre la app en el agente, luego reintenta.",
+                   settings.AGENT_START_TIMEOUT)
+    return False
+
+
 async def _conectar_agente_cdp(pw):
     """Engancha por CDP al WebView2 del Hermes2Agent (modo AGENT_CDP).
 
@@ -245,10 +329,24 @@ async def logged_page(request):
     autenticado por Kerberos): reutiliza la página existente, OMITE el login, y en
     el teardown solo DESCONECTA (no cierra la app)."""
     from src.helpers.session_helper import SessionHelper
+    import os as _os
+    # ¿Corrida EN PARALELO? (xdist con más de 1 worker). El modo CDP se engancha a
+    # UN solo WebView2 del Hermes2Agent, así que NO puede paralelizarse: si hay
+    # varios workers, se IGNORA el CDP y cada worker abre su navegador web propio.
+    _n_workers = int(_os.getenv("PYTEST_XDIST_WORKER_COUNT", "1") or "1")
+    _paralelo = _n_workers > 1
+    _usar_cdp = settings.AGENT_CDP and not _paralelo
+    if settings.AGENT_CDP and _paralelo:
+        logger.warning("[logged_page] HERMES_AGENT_CDP está activo pero hay %d "
+                       "workers en paralelo — el agente NO se puede compartir. Se "
+                       "IGNORA el CDP y cada worker usa su propio navegador web.",
+                       _n_workers)
     async with async_playwright() as pw:
         # ── Modo AGENTE (CDP): enganche al WebView2, sin lanzar navegador ──────
-        if settings.AGENT_CDP:
+        if _usar_cdp:
             try:
+                # Verifica que el Hermes2Agent esté corriendo; si no, lo arranca.
+                await _asegurar_agente_iniciado()
                 navegador, contexto, page = await _conectar_agente_cdp(pw)
             except Exception as e:
                 pytest.skip(
@@ -296,6 +394,29 @@ async def logged_page(request):
                         await _flow.cambiar_idioma(lang)
                     except Exception:
                         pass
+                    # ── Soporte Remoto (INDISPENSABLE en el agente) ──────────
+                    # En el WebView2 la captura de pantalla sale NEGRA; el
+                    # Soporte Remoto habilita la pantalla. Se prepara AQUÍ, en el
+                    # arranque de Kerberos, para que CUALQUIER caso corra con la
+                    # pantalla ya habilitada. Best-effort: si ya está habilitado
+                    # (tooltip 'Token validated successfully') no se repite.
+                    if settings.SOPORTE_REMOTO and _os.getenv(
+                            "HERMES_AGENT_SOPORTE", "1").strip().lower() in (
+                            "1", "true", "si", "sí", "yes"):
+                        try:
+                            from src.helpers.token_support import obtener_token
+                            tok = obtener_token()
+                            if tok:
+                                await _flow.aplicar_soporte_remoto(tok)
+                                logger.info("[Agente-CDP] Soporte Remoto habilitado "
+                                            "(pantalla lista).")
+                            else:
+                                logger.warning("[Agente-CDP] Sin token de BD — NO se "
+                                               "habilitó el Soporte Remoto (la pantalla "
+                                               "seguirá en negro).")
+                        except Exception as e:
+                            logger.warning("[Agente-CDP] Soporte Remoto no aplicado: %s",
+                                           str(e)[:120])
             except Exception as e:
                 logger.warning("[Agente-CDP] Notificaciones/idioma: %s", str(e)[:100])
             logger.info("[Agente-CDP] Listo — URL: %s", page.url)
@@ -316,7 +437,16 @@ async def logged_page(request):
                     pass
             return
 
-        navegador, contexto = await _nuevo_contexto(pw, usar_sesion=True)
+        # Paralelo por USUARIOS: cada worker de xdist usa un usuario distinto y su
+        # propia sesión guardada (evita multisesión con un solo usuario). En una
+        # corrida sin xdist el worker es 'gw0' y respeta PORTAL_USER del .env.
+        import os as _os
+        worker_id = _os.getenv("PYTEST_XDIST_WORKER", "gw0")
+        _user, _pass = settings.usuario_por_worker(worker_id)
+        _storage = settings.storage_state_por_worker(worker_id)
+
+        navegador, contexto = await _nuevo_contexto(
+            pw, usar_sesion=True, storage_path=_storage, expected_user=_user)
         page = await contexto.new_page()
 
         # Diagnóstico: captura pasiva de consola + HTTP (4xx/5xx con payload,
@@ -326,8 +456,21 @@ async def logged_page(request):
         diag = Diagnostics(page)
         diag.attach()
 
-        helper = SessionHelper(contexto, page)
-        await helper.ensure_logged_in()
+        helper = SessionHelper(contexto, page, user=_user, password=_pass,
+                               storage_state=_storage)
+        from src.helpers.session_helper import HandoffEscritorioError
+        try:
+            await helper.ensure_logged_in()
+        except HandoffEscritorioError as e:
+            # Equipo CON Hermes2Agent: el login web hace handoff al escritorio.
+            # Se salta con guía en vez de colgar/errar feo.
+            try:
+                await contexto.close(); await navegador.close()
+            except Exception:
+                pass
+            pytest.skip(f"[logged_page] {e}")
+            return
+        logger.info("[logged_page] worker=%s · usuario=%s", worker_id, _user)
 
         # Notificaciones: leer y cerrar el modal intrusivo "Notificaciones
         # Importantes" si aparece (port fiel de ai_agent → conftest L200).
@@ -466,6 +609,51 @@ async def logged_page_multi(request):
                 await _teardown_reportes(page, diag)
             await contexto.close()
             await navegador.close()
+
+
+@pytest_asyncio.fixture
+async def chronos_page(request):
+    """Sesión SOLO de Chronos (back office) — NO abre Hermes.
+
+    Para los CP que son puramente reportes de Chronos (CP16–CP21): lanza un
+    navegador propio, entra a Chronos reutilizando su sesión (cookies + login solo
+    si expiró) y entrega la página lista. No hace login de Hermes, ni cierra
+    notificaciones de Hermes, ni Soporte Remoto (nada de eso aplica a Chronos).
+    Ignora el modo AGENT_CDP (Chronos no vive dentro del Hermes2Agent)."""
+    from src.sanity_general import chronos as CR
+    async with async_playwright() as pw:
+        # usar_sesion=False: Chronos gestiona SUS propias cookies (chronos_cookies)
+        # dentro de abrir_chronos; no se carga el storage_state de Hermes.
+        navegador, contexto = await _nuevo_contexto(pw, usar_sesion=False)
+        page = await contexto.new_page()
+
+        from src.helpers.diagnostics import Diagnostics
+        diag = Diagnostics(page)
+        diag.attach()
+
+        ok = await CR.abrir_chronos(page)
+        if not ok:
+            logger.warning("[chronos_page] No se pudo dejar la sesión de Chronos "
+                           "lista (revisa CHRONOS_USER/PASS o el 2FA).")
+        logger.info("[chronos_page] Listo — URL: %s", page.url)
+        try:
+            yield page
+        finally:
+            es_sanity = False
+            try:
+                es_sanity = request.node.get_closest_marker("sanity_general") is not None
+            except Exception:
+                es_sanity = False
+            if not es_sanity:
+                await _teardown_reportes(page, diag)
+            try:
+                await contexto.close()
+            except Exception:
+                pass
+            try:
+                await navegador.close()
+            except Exception:
+                pass
 
 
 async def _teardown_reportes(page, diag=None):

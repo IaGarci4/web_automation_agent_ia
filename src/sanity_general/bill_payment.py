@@ -267,6 +267,45 @@ async def _cancelar_error_impresora(flow, timeout: int = 12_000) -> bool:
     return False
 
 
+async def _accept_visible(page) -> bool:
+    """True si el botón Accept de 'Bill Payment Confirmation' está en pantalla
+    (algún elemento con el testid, con tamaño > 0)."""
+    try:
+        return await page.evaluate(
+            """() => {
+                const els = document.querySelectorAll(
+                    "[data-testid='confirmation-modal-accept-button-button']");
+                for (const b of els) {
+                    const r = b.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) return true;
+                }
+                return false;
+            }""")
+    except Exception:
+        return False
+
+
+async def _click_accept_js(page) -> bool:
+    """Clic por JS directo sobre el Accept de la confirmación (bypass de
+    visibilidad/overlay que hacía que Playwright no lo pulsara). Respaldo por
+    texto 'Accept'. Devuelve True si clicó algo."""
+    try:
+        return await page.evaluate(
+            """() => {
+                const vis = (b) => { const r = b.getBoundingClientRect();
+                                     return r.width > 0 && r.height > 0; };
+                const byId = document.querySelectorAll(
+                    "[data-testid='confirmation-modal-accept-button-button']");
+                for (const b of byId) { if (vis(b)) { b.click(); return true; } }
+                const byText = [...document.querySelectorAll('button')].filter(
+                    b => /^\\s*accept\\s*$/i.test((b.textContent || '').trim()));
+                for (const b of byText) { if (vis(b)) { b.click(); return true; } }
+                return false;
+            }""")
+    except Exception:
+        return False
+
+
 async def summary_pagar(flow) -> None:
     """Paga desde el resumen manejando el error de impresora ('printer not
     connected') que aparece tras Continue y/o tras Pay: se le da CANCEL (EN/ES)
@@ -276,13 +315,19 @@ async def summary_pagar(flow) -> None:
     pay = page.get_by_test_id(SUMMARY_PAY_BTN).first
 
     # Fase 1: esperar el botón Pay del resumen, cancelando el error de impresora
-    # cada vez que aparezca (puede salir ANTES del resumen, tras Continue).
+    # cada vez que aparezca (puede salir ANTES del resumen, tras Continue). En esta
+    # versión la confirmación 'Bill Payment Confirmation' (Accept) puede salir
+    # DIRECTO tras Continue, sin botón Pay: si aparece, se salta a Fase 2 en vez de
+    # esperar 30s en vano.
     t = 0
     while t < 30_000:
         if await _error_impresora_visible(flow):
             await _cancelar_error_impresora(flow, timeout=6_000)
             await page.wait_for_timeout(500)
             continue
+        if await _accept_visible(page):
+            logger.info("Confirmación 'Accept' visible tras Continue — se salta el Pay.")
+            break
         try:
             if await pay.is_visible():
                 break
@@ -291,50 +336,64 @@ async def summary_pagar(flow) -> None:
         await page.wait_for_timeout(1_000)
         t += 1_000
 
-    # Click Pay
+    # Click Pay — SOLO si el botón Pay está presente. Si la confirmación (Accept)
+    # ya salió directo tras Continue, NO hay Pay: se omite (sin esperar 10s en vano)
+    # y se pasa a Fase 2 a pulsar Accept.
     try:
-        await pay.wait_for(state="visible", timeout=10_000)
-        await pay.click(force=True)
-        logger.info("Bill payment: 'Pay' pulsado.")
+        if await pay.is_visible():
+            await pay.click(force=True)
+            logger.info("Bill payment: 'Pay' pulsado.")
+        else:
+            logger.info("Bill payment: sin botón 'Pay' (confirmación directa) — a Fase 2.")
     except Exception as e:
-        logger.warning("No apareció/pulsó el botón Pay del resumen: %s", str(e)[:80])
+        logger.warning("No se pudo pulsar el botón Pay del resumen: %s", str(e)[:80])
 
     # Fase 2 (post-Pay): el SEGUNDO error de impresora aparece TARDE (al finalizar
     # el pago, ~10-20s). Se sondea hasta 45s: si sale el error → Cancel; si sale
     # la confirmación de pago → Aceptar. Se termina cuando el resumen cierra y ya
     # no hay más modales (con una última ventana por el error tardío).
+    # Se ESPERA la confirmación 'Bill Payment Confirmation' hasta 25s (aparece un
+    # instante después de Continue/Pay) y se ACEPTA — lógica simple del repo maduro.
+    # Si en el camino sale el error de impresora (tardío), se cancela y se sigue
+    # esperando. NO se corta por "el resumen ya cerró": en esta versión no hay modal
+    # Pay, así que ese corte hacía salir ANTES de que pintara la confirmación.
     import time as _t
-    fin = _t.monotonic() + 45
+    acc = page.get_by_test_id(CONFIRM_ACCEPT_BTN).first
+    fin = _t.monotonic() + 25
     confirmado = False
     while _t.monotonic() < fin:
-        # 1) Error de impresora (tardío) → Cancel
+        # Error de impresora (tardío) → Cancel y seguir esperando la confirmación.
         if await _error_impresora_visible(flow):
             await _cancelar_error_impresora(flow, timeout=6_000)
-            await page.wait_for_timeout(600)
+            await page.wait_for_timeout(400)
             continue
-        # 2) Confirmación de pago de Bill → Aceptar
+        # Confirmación visible → Aceptar (Playwright; si falla, JS por testid).
         try:
-            acc = page.get_by_test_id(CONFIRM_ACCEPT_BTN).first
             if await acc.is_visible():
-                await acc.click(force=True)
+                try:
+                    await acc.click(force=True)
+                except Exception:
+                    await _click_accept_js(page)
                 confirmado = True
                 logger.info("Confirmación de pago aceptada.")
-                await page.wait_for_timeout(800)
-                continue
+                try:
+                    await acc.wait_for(state="hidden", timeout=8_000)
+                except Exception:
+                    pass
+                break
         except Exception:
             pass
-        # 3) ¿El resumen ya cerró? → dar una última ventana por el error tardío
-        resumen_cerrado = True
-        try:
-            resumen_cerrado = not await pay.is_visible()
-        except Exception:
-            pass
-        if resumen_cerrado:
-            if await _cancelar_error_impresora(flow, timeout=6_000):
-                continue  # apareció tarde y lo cancelamos → seguir vigilando
-            break         # resumen cerrado y sin error → pago finalizado
-        await page.wait_for_timeout(1_000)
+        # Respaldo: si el testid está en el DOM pero is_visible() falla por overlay.
+        if await _accept_visible(page):
+            if await _click_accept_js(page):
+                confirmado = True
+                logger.info("Confirmación de pago aceptada (JS).")
+                await page.wait_for_timeout(600)
+                break
+        await page.wait_for_timeout(600)
 
+    if not confirmado:
+        logger.info("No apareció la confirmación de pago (o ya se cerró sola).")
     logger.info("Bill payment: pago enviado%s.", " (confirmado)" if confirmado else "")
 
 
@@ -376,7 +435,22 @@ async def _buscar_bill_payment_por_telefono(flow, phone: str) -> None:
     # Teléfono + Buscar
     await page.locator(SEARCH_INPUT_FIELD).first.fill(phone)
     await page.locator(SEARCH_BUTTON).first.click(force=True)
-    await page.wait_for_timeout(4000)
+    # El grid del reporte tarda en poblarse (más aún con VPN): en vez de un
+    # wait fijo corto (que dejaba "no filas"), se SONDEA hasta ~25s a que
+    # aparezca al menos una fila de resultado. El repo viejo esperaba 30s fijos.
+    fila_sel = ("tr.report-transactions-result-row, "
+                "button.report-transaction-menu-toggle, [data-testid*='menu-toggle']")
+    espera = 0
+    while espera < 25_000:
+        try:
+            if await page.locator(fila_sel).first.is_visible():
+                break
+        except Exception:
+            pass
+        await page.wait_for_timeout(1_000)
+        espera += 1_000
+    else:
+        logger.warning("[BillPay] El grid no mostró filas tras ~25s de Buscar.")
 
 
 _RE_CANCEL_MENU = re.compile(r"^\s*(cancel|cancelar)\s*$", re.I)

@@ -240,7 +240,7 @@ async def _esperar_estatus_cancelado(page, timeout_ms: int = 8_000) -> bool:
 
 async def cancelar(flow, tipo: str = "money_transfer", *, evi=None,
                    paso: int = None, row_index: int = 0,
-                   notes: str = "KRA-1527 automation",
+                   notes: str = None,
                    reason_index: int = 0):
     """Cancela la transacción más reciente del tipo indicado.
 
@@ -252,6 +252,13 @@ async def cancelar(flow, tipo: str = "money_transfer", *, evi=None,
     estaba probando. El detalle queda en el reporte para saber que hay un
     registro vivo en TEST."""
     page = flow.page
+    # Nota de cancelación: por defecto GENÉRICA ("Automation"), NUNCA una etiqueta
+    # hardcodeada. Para marcar la nota con una etiqueta concreta (ej. correr la
+    # KRA-1527), se pasa `notes=...` explícito o se exporta CANCEL_NOTE en esa
+    # corrida:  $env:CANCEL_NOTE="KRA-1527 automation"
+    if notes is None:
+        import os as _os
+        notes = _os.getenv("CANCEL_NOTE", "Automation")
     # Con un diálogo encima, el combo no se abre y Buscar no devuelve filas:
     # el módulo concluiría «no hay transacciones que cancelar» cuando en
     # realidad no ha podido ni mirar.

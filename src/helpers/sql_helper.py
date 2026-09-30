@@ -53,6 +53,14 @@ CONTRASENA = os.getenv("PASSWORD_SQL", "").strip()
 # Cadena completa, si alguien prefiere darla hecha. Gana sobre lo de arriba.
 CONN_DIRECTA = os.getenv("SQL_CONN", "").strip()
 
+# Timeout de login (segundos). Corto a propósito: si la BD no responde, fallar
+# rápido en vez de colgar cada caso ~30s. Configurable con SQL_LOGIN_TIMEOUT.
+_LOGIN_TIMEOUT = int(os.getenv("SQL_LOGIN_TIMEOUT", "4"))
+# Cache de "BD no accesible": tras el primer fallo de conexión en el proceso, no
+# se reintenta en cada caso (ahorra ~4s × caso en toda la corrida del sanity).
+# Se limpia solo al reiniciar el proceso.
+_BD_CAIDA = False
+
 # Drivers ODBC en orden de preferencia. Se prueba cuál está instalado en vez
 # de fijar uno: la máquina de QA tiene el 17 y la de integración puede tener
 # el 18, y un nombre clavado convierte eso en un fallo incomprensible.
@@ -104,6 +112,10 @@ def cadena_conexion() -> str:
     # privada con certificado autofirmado eso falla con un error de TLS que no
     # se parece en nada a «el certificado no es de confianza».
     partes.append("TrustServerCertificate=yes")
+    # Timeout de LOGIN corto: si la BD no está accesible (fuera de la VPN, caída),
+    # que se rinda en pocos segundos y NO cuelgue el caso ~30s. El kwarg `timeout`
+    # de pyodbc a veces no corta el fallback de Named Pipes; esta llave sí.
+    partes.append(f"Connection Timeout={_LOGIN_TIMEOUT}")
     return ";".join(partes) + ";"
 
 
@@ -128,11 +140,19 @@ def motivo_sin_conexion() -> str:
     return ""
 
 
-def conectar(timeout: int = 10):
+def conectar(timeout: int = None):
     """Conexión a SQL Server, o `None` con el motivo en el log."""
+    global _BD_CAIDA
+    # Si ya falló antes en esta corrida, no reintentar (no gastar ~4s por caso).
+    if _BD_CAIDA:
+        logger.info("[SQL] BD marcada como no accesible en esta corrida — se omite el reintento.")
+        return None
+    if timeout is None:
+        timeout = _LOGIN_TIMEOUT
     motivo = motivo_sin_conexion()
     if motivo:
         logger.warning("[SQL] Sin validación en BD: %s.", motivo)
+        _BD_CAIDA = True
         return None
     try:
         import pyodbc
@@ -142,6 +162,7 @@ def conectar(timeout: int = 10):
                     SERVIDOR, BASE_DATOS, modo)
         return cn
     except Exception as e:
+        _BD_CAIDA = True  # no reintentar el resto de la corrida
         # El mensaje de pyodbc trae la cadena completa, y la cadena lleva la
         # CONTRASEÑA. Se recorta y se censura antes de que llegue al log o,
         # peor, al reporte que se adjunta al ticket.
@@ -165,6 +186,27 @@ def consultar(cn, sql: str, params: tuple = ()) -> list:
     except Exception as e:
         logger.warning("[SQL] Consulta fallida: %s", str(e)[:200])
         return []
+
+
+def ejecutar(cn, sql: str, params: tuple = (), commit: bool = True) -> bool:
+    """Ejecuta una sentencia que NO devuelve filas (EXEC de SP, UPDATE, etc.).
+
+    Hace commit por defecto. Devuelve True si se ejecutó sin excepción; False si
+    falló (con el motivo en el log, censurando la contraseña)."""
+    if cn is None:
+        return False
+    try:
+        cur = cn.cursor()
+        cur.execute(sql, params) if params else cur.execute(sql)
+        if commit:
+            cn.commit()
+        return True
+    except Exception as e:
+        detalle = str(e)
+        if CONTRASENA:
+            detalle = detalle.replace(CONTRASENA, "***")
+        logger.warning("[SQL] Ejecución fallida: %s", detalle[:200])
+        return False
 
 
 def describir() -> str:

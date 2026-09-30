@@ -42,6 +42,10 @@ logger = get_logger("CP01")
 PAYER_CODE   = os.getenv("CP01_PAYER", "SORIANA")   # cash, MEXICO
 TIPO_ENVIO   = "cash"
 MONTO        = int(os.getenv("CP01_AMOUNT", "20"))   # > $10 dispara la KYC Rule (Request ID)
+# Teléfono del CLIENTE en PRODUCCIÓN: número FIJO ASIGNADO (bloque ficticio NANP
+# 555-01NN) para que el SMS del recibo llegue a un buzón controlado. En TEST se
+# ignora y se usa el aleatorio de siempre. Override puntual: CP01_PROD_PHONE.
+PROD_PHONE   = os.getenv("CP01_PROD_PHONE", "5550100022")
 
 # Identificación del cliente (ficha de Info Adicional)
 IA_PAIS      = "EL SALVADOR"
@@ -84,7 +88,8 @@ async def test_CP01_money_transfer_cash_kyc(logged_page: Page, language, width, 
 
     # ── Steps 2–3: Formulario principal (REUTILIZADO) ────────────────────────
     await F.llenar_formulario_completo(
-        flow, datos, cfg, pais, ciudad, estado, monto=MONTO, tipo=TIPO_ENVIO)
+        flow, datos, cfg, pais, ciudad, estado, monto=MONTO, tipo=TIPO_ENVIO,
+        customer_phone=PROD_PHONE)
 
     # Nombre del cliente USADO (cacheado por datos) — para buscar y cancelar luego.
     cliente = datos.nombre_cliente()
@@ -118,14 +123,33 @@ async def test_CP01_money_transfer_cash_kyc(logged_page: Page, language, width, 
         flow, pais=IA_PAIS, tipo_id=IA_TIPO_ID, num_id=IA_NUM_ID,
         exp=IA_EXP, dob=IA_DOB, tipo=TIPO_ENVIO)
 
-    # Evidencia con marcado: campos de identificación (país + número de ID)
-    await evi.shot("info_adicional", paso=3, locators=[
-        logged_page.get_by_test_id(IA.INPUT_PAIS),
-        logged_page.get_by_test_id(IA.INPUT_NUM_ID),
-    ])
-    assert llenado, "La ficha de Información Adicional no se llenó correctamente."
-    await IA.aceptar(flow)
-    logger.info("[CP01] Step 4 OK (Información Adicional llenada y aceptada).")
+    if llenado:
+        # Evidencia con marcado: campos de identificación (país + número de ID)
+        await evi.shot("info_adicional", paso=3, locators=[
+            logged_page.get_by_test_id(IA.INPUT_PAIS),
+            logged_page.get_by_test_id(IA.INPUT_NUM_ID),
+        ])
+        await IA.aceptar(flow)
+        logger.info("[CP01] Step 4 OK (Información Adicional llenada y aceptada).")
+    else:
+        # En PRODUCCIÓN (cliente registrado, sin KYC Hold) NO se pide Info
+        # Adicional: tras Continue aparece directo el resumen 'Transaction
+        # Information Confirmation' (YES, Send). Si ese resumen está visible, se
+        # continúa al envío; si no, es un fallo real y se corta.
+        import re as _re
+        resumen = await logged_page.get_by_test_id(
+            "transfers-container-modal-summary-0-send-button").count()
+        # En PROD un beneficiario nuevo/OFAC muestra 'Additional beneficiary
+        # information is required… contact Compliance': lo maneja completar_envio
+        # (Back to Transfer + reintento), igual que CP02.
+        msg = await logged_page.get_by_text(_re.compile(
+            r"additional beneficiary information is required|contact the compliance|"
+            r"informaci[oó]n adicional del beneficiario|contacte a cumplimiento",
+            _re.I)).count()
+        assert resumen or msg, "La ficha de Información Adicional no se llenó correctamente."
+        await evi.shot("info_adicional", paso=3)
+        logger.info("[CP01] Step 4 — no se pidió ficha de Info Adicional (resumen o "
+                    "mensaje de compliance visible) — se continúa al envío.")
 
     # ── Step 5: Completar envío ──────────────────────────────────────────────
     if COMPLETAR:

@@ -128,23 +128,37 @@ async def ir_a_fax_assignment(page) -> bool:
         return False
 
 
-async def hay_registro_de_fax(page, timeout_ms: int = 30_000):
+async def hay_registro_de_fax(page, timeout_ms: int = 90_000):
     """Espera a que la tabla de Fax Assignment tenga al menos un registro.
 
-    Devuelve (ok, locator_de_la_primera_celda) para poder resaltarlo en la
-    evidencia."""
+    El fax puede tardar en entrar a la cola y la tabla NO se auto-refresca, así
+    que además de sondear (hasta ~90s) se RECARGA la vista cada ~25s para traer
+    los registros nuevos. Devuelve (ok, locator_de_la_primera_celda)."""
     celda = page.locator(PRIMERA_FILA).first
     espera = 0
+    prox_reload = 25_000
     while espera <= timeout_ms:
         try:
             if await celda.is_visible():
                 texto = (await celda.inner_text() or "").strip()
-                logger.info("[Fax] ✓ Registro en Fax Assignment: '%s'", texto[:60])
-                return True, celda
+                if texto:
+                    logger.info("[Fax] ✓ Registro en Fax Assignment: '%s'", texto[:60])
+                    return True, celda
         except Exception:
             pass
-        await page.wait_for_timeout(500)
-        espera += 500
+        await page.wait_for_timeout(1_000)
+        espera += 1_000
+        # Recargar la vista periódicamente: la tabla no refresca sola y el fax
+        # llega a la cola con retraso.
+        if espera >= prox_reload and espera < timeout_ms:
+            prox_reload += 25_000
+            try:
+                logger.info("[Fax] Recargando Fax Assignment para traer registros nuevos…")
+                await page.reload(wait_until="domcontentloaded")
+                await page.wait_for_timeout(5_000)
+                celda = page.locator(PRIMERA_FILA).first
+            except Exception:
+                pass
     logger.warning("[Fax] La tabla de Fax Assignment quedó vacía tras %.0f s.",
                    timeout_ms / 1000)
     return False, None

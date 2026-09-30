@@ -346,6 +346,37 @@ async def completar_envio_home(page, language: str = "English") -> None:
     logger.info("[CP14] Envío completado.")
 
 
+async def leer_agentcode(page) -> str:
+    """Lee el AgentCode de la agencia ACTIVA desde el header de Hermes.
+
+    El header muestra algo como '50280-CA IGNACIO GARCIA'; se extrae el código
+    con formato NNNNN-XX (p. ej. '50280-CA'). Ese código define en QUÉ agencia se
+    buscará la transacción en Chronos y con qué IdAgent se consulta la BD.
+    Devuelve '' si no lo encuentra."""
+    patron = re.compile(r"\d{3,6}-[A-Z]{2}")
+    # 1) Por el texto del header (el elemento que contiene el código).
+    try:
+        loc = page.get_by_text(patron).first
+        txt = (await loc.inner_text()) or ""
+        m = patron.search(txt)
+        if m:
+            logger.info("[CP14] AgentCode del header: %s", m.group(0))
+            return m.group(0)
+    except Exception:
+        pass
+    # 2) Respaldo: escanear el texto del body.
+    try:
+        body = (await page.locator("body").inner_text()) or ""
+        m = patron.search(body)
+        if m:
+            logger.info("[CP14] AgentCode (body): %s", m.group(0))
+            return m.group(0)
+    except Exception:
+        pass
+    logger.warning("[CP14] No se pudo leer el AgentCode del header.")
+    return ""
+
+
 async def obtener_folio_en_hermes(flow, nombre_cliente: str = None,
                                   intentos: int = 6) -> str:
     """Tras enviar, va a Reportes > Transacciones, BUSCA la transacción (igual que
@@ -641,15 +672,39 @@ async def cancelar_transfer_chronos(page) -> None:
     await nota.click()
     await nota.fill("TEST")
 
-    await page.get_by_text("Save", exact=True).nth(3).click()
-    await page.wait_for_timeout(4_000)
+    # Save: apuntar al BOTÓN real (verde, visible) en vez de get_by_text().nth(3),
+    # que esperaba hasta 30s a que el 4º 'Save' fuera accionable. Se prueba por
+    # rol/botón y se clickea el primero VISIBLE, con espera corta.
+    import re as _re
+    guardado = False
+    for get in (
+        lambda: page.get_by_role("button", name=_re.compile(r"^\s*save\s*$", _re.I)),
+        lambda: page.locator("button:has-text('Save'), button.btn-green:has-text('Save'), "
+                             ".btn:has-text('Save')"),
+        lambda: page.get_by_text("Save", exact=True),
+    ):
+        try:
+            loc = get()
+            n = min(await loc.count(), 8)
+            for i in range(n):
+                b = loc.nth(i)
+                if await b.is_visible():
+                    await b.click(timeout=5_000)
+                    guardado = True
+                    break
+            if guardado:
+                break
+        except Exception:
+            continue
+    if not guardado:
+        logger.warning("[CP14] No se encontró un botón 'Save' visible.")
 
     await expect(page.locator(CH_SUCCESS_MSG)).to_have_text(
         "Transfer has been successfully saved.", timeout=15_000)
     logger.info("[CP14] Mensaje de éxito confirmado.")
 
     await page.get_by_role("button", name="Close").first.click()
-    await page.wait_for_timeout(4_000)
+    await page.wait_for_timeout(1_500)
 
     await expect(page.get_by_text("Cancelled", exact=True).nth(1)).to_have_text(
         "Cancelled", timeout=10_000)

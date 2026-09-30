@@ -410,9 +410,14 @@ async def login_google(page) -> bool:
 
     Si Google pide 2FA se espera hasta TIMEOUT_2FA para aprobarlo en el celular;
     si no lo pide, entra de inmediato (no se espera de más)."""
-    usuario, clave = settings.CHRONOS_USER, settings.CHRONOS_PASS
+    # El SSO de Google usa la contraseña de GMAIL (variable GMAIL_PASS), no la de
+    # Chronos/Keycloak — igual que el repo maduro. Fallback a CHRONOS_PASS por si
+    # solo esa está definida.
+    import os as _os
+    usuario = settings.CHRONOS_USER
+    clave = (_os.getenv("GMAIL_PASS") or settings.CHRONOS_PASS or "").strip()
     if not usuario or not clave:
-        logger.error("[Chronos] Faltan CHRONOS_USER / CHRONOS_PASS en el .env.")
+        logger.error("[Chronos] Faltan CHRONOS_USER / GMAIL_PASS en el .env.")
         return False
     try:
         # Botón "Google" del SSO
@@ -456,12 +461,45 @@ async def login_google(page) -> bool:
                 await sig.click()
             except Exception:
                 pass
-        # Contraseña (puede no pedirse si la cuenta ya estaba autenticada)
-        pwd = page.locator('input[name="Passwd"]').first
+        # Contraseña (puede no pedirse si la cuenta ya estaba autenticada).
+        # OJO: la página de Google suele tener un input Passwd OCULTO además del
+        # visible; `.first` agarraba el oculto → wait_for(visible) expiraba y NO se
+        # llenaba la contraseña. Se busca el input Passwd VISIBLE y se llena de forma
+        # verificada (fill → verificar valor → type como respaldo), igual que el correo.
         try:
-            await pwd.wait_for(state="visible", timeout=20_000)
+            # Espera a que EXISTA un campo de contraseña visible (transición de Google).
+            await page.wait_for_selector(
+                'input[name="Passwd"]:visible, input[type="password"]:visible',
+                timeout=25_000)
+            pwd = None
+            cands = page.locator('input[name="Passwd"], input[type="password"]')
+            for i in range(await cands.count()):
+                c = cands.nth(i)
+                try:
+                    if await c.is_visible():
+                        pwd = c
+                        break
+                except Exception:
+                    continue
+            if pwd is None:
+                raise RuntimeError("campo de contraseña no visible")
+            await pwd.click()
             await pwd.fill(clave)
+            await page.wait_for_timeout(600)
+            if not (await pwd.input_value() or "").strip():
+                logger.warning("[Chronos] La contraseña quedó vacía — reintento por tecleo.")
+                await pwd.type(clave, delay=60)
+                await page.wait_for_timeout(500)
+            logger.info("[Chronos] Contraseña ingresada — enviando.")
             await pwd.press("Enter")
+            # 'Siguiente' del paso de contraseña, si sigue en pantalla.
+            try:
+                sig = page.get_by_role(
+                    "button", name=re.compile(r"siguiente|next", re.I)).first
+                if await sig.count() and await sig.is_visible():
+                    await sig.click()
+            except Exception:
+                pass
             logger.info("[Chronos] Credenciales enviadas — esperando tu "
                         "APROBACIÓN del 2FA (hasta %d min)…",
                         TIMEOUT_2FA // 60000)
@@ -494,18 +532,53 @@ async def guardar_sesion(context) -> None:
 # ── Processing > Edited Checks ───────────────────────────────────────────────
 
 async def ir_a_edited_checks(page) -> bool:
-    """Menu → Processing → Edited Checks. True si el título quedó visible."""
+    """Menu → Processing → Edited Checks. Se CONFIRMA que quedó REALMENTE en la
+    pantalla (URL '.../processing/edited-checks' + buscador visible), no solo por
+    el título: con la sesión reutilizada la pantalla a veces cargaba y REBOTABA a
+    home, dejando el buscador ausente y colgando el siguiente paso. Si rebota, se
+    re-navega hasta 3 veces."""
+    async def _en_edited_checks() -> bool:
+        """True si la pantalla es USABLE: URL correcta + buscador visible."""
+        try:
+            await page.locator(SEARCH_INPUT).locator(
+                "visible=true").first.wait_for(state="visible", timeout=15_000)
+            return "edited-checks" in (page.url or "").lower()
+        except Exception:
+            return False
+
+    # 1) VÍA DIRECTA POR URL — el menú (mat-panel Processing) es flaky y a veces
+    #    no expande a tiempo, dejando el clic sin navegar (se queda en /home). La
+    #    sesión ya es válida para el app, así que ir directo a la ruta funciona.
     try:
-        await _click_listo(page, page.locator(TOOLBAR_MENU).first, "Menu abierto")
-        await _click_listo(page, page.locator(PROCESSING_OPTION).first, "Processing")
-        await _click_listo(page, page.locator(EDITED_CHECKS_LINK).first, "Edited Checks")
-        titulo = page.locator(TITLE_SEL).filter(has_text=RE_EDITED_TITLE).first
-        await titulo.wait_for(state="visible", timeout=180_000)
-        logger.info("[Chronos] Pantalla Edited Checks lista.")
-        return True
+        base = (page.url or "").split("/Frontend/")[0]
+        if base:
+            destino = base + "/Frontend/processing/edited-checks"
+            await page.goto(destino, wait_until="domcontentloaded", timeout=60_000)
+            await page.wait_for_timeout(1_500)
+            if await _en_edited_checks():
+                logger.info("[Chronos] Edited Checks abierta por URL directa.")
+                return True
     except Exception as e:
-        logger.warning("[Chronos] No se pudo abrir Edited Checks: %s", str(e)[:110])
-        return False
+        logger.warning("[Chronos] URL directa a Edited Checks falló: %s", str(e)[:90])
+
+    # 2) RESPALDO: navegación por el menú (con verificación + reintentos).
+    for intento in range(1, 4):
+        try:
+            await _click_listo(page, page.locator(TOOLBAR_MENU).first, "Menu abierto")
+            await _click_listo(page, page.locator(PROCESSING_OPTION).first, "Processing")
+            await page.wait_for_timeout(800)   # dar tiempo a que expanda el panel
+            await _click_listo(page, page.locator(EDITED_CHECKS_LINK).first, "Edited Checks")
+        except Exception as e:
+            logger.warning("[Chronos] Nav a Edited Checks falló (intento %d): %s",
+                           intento, str(e)[:90])
+        if await _en_edited_checks():
+            logger.info("[Chronos] Pantalla Edited Checks lista (intento %d).", intento)
+            return True
+        logger.warning("[Chronos] Edited Checks no quedó activa (URL=%s) — reintento %d.",
+                       page.url, intento)
+        await page.wait_for_timeout(1_500)
+    logger.warning("[Chronos] No se pudo dejar Edited Checks activa tras 3 intentos.")
+    return False
 
 
 async def buscar_agencia(page, agency_code: str) -> None:
@@ -523,28 +596,28 @@ async def buscar_agencia(page, agency_code: str) -> None:
     logger.info("[Chronos] Edited Checks filtrado por agencia %s", agency_code)
 
 
-async def buscar_fila(page, *, amount: str, agency_code: str = None,
-                      folio: str = None, movement_date: str = None):
-    """Localiza la fila de la transacción. El FOLIO es el criterio fuerte; si no
-    se pasa, filtra por monto (+ agencia) y prefiere la fecha del movimiento."""
+async def _escanear_filas(page, *, amount, agency_code, folio, movement_date):
+    """Un PASE sobre la tabla actual. Devuelve (fila|None, folios_vistos)."""
     filas = page.locator(ROWS_SEL)
     try:
-        await filas.first.wait_for(state="visible", timeout=TIMEOUT)
+        n = await filas.count()
     except Exception:
-        logger.warning("[Chronos] Edited Checks: la tabla no mostró filas.")
-        return None
+        n = 0
+    if n == 0:
+        return None, []
     esperado = _norm_amount(str(amount))
     candidatos = []
-    n = await filas.count()
+    folios_vistos = []
     for i in range(min(n, 80)):
         fila = filas.nth(i)
         celdas = fila.locator("td")
         try:
-            if folio:
-                f = (await celdas.nth(COL_FOLIO).inner_text() or "").strip()
-                if f == str(folio):
-                    logger.info("[Chronos] Fila encontrada por folio %s.", folio)
-                    return fila
+            f = (await celdas.nth(COL_FOLIO).inner_text() or "").strip()
+            if f:
+                folios_vistos.append(f)
+            if folio and f == str(folio):
+                logger.info("[Chronos] Fila encontrada por folio %s.", folio)
+                return fila, folios_vistos
             if _norm_amount(await celdas.nth(COL_AMOUNT).inner_text()) != esperado:
                 continue
             if agency_code:
@@ -555,15 +628,55 @@ async def buscar_fila(page, *, amount: str, agency_code: str = None,
             candidatos.append((fecha, fila))
         except Exception:
             continue
-    if not candidatos:
-        return None
-    if movement_date:
-        for fecha, fila in candidatos:
-            if fecha.startswith(movement_date):
-                return fila
-        logger.warning("[Chronos] Ninguna fila con fecha %s — uso la más reciente.",
-                       movement_date)
-    return candidatos[0][1]
+    if candidatos:
+        if movement_date:
+            for fecha, fila in candidatos:
+                if fecha.startswith(movement_date):
+                    return fila, folios_vistos
+        return candidatos[0][1], folios_vistos
+    return None, folios_vistos
+
+
+async def buscar_fila(page, *, amount: str, agency_code: str = None,
+                      folio: str = None, movement_date: str = None):
+    """Localiza la fila de la transacción. El FOLIO es el criterio fuerte; si no
+    se pasa, filtra por monto (+ agencia) y prefiere la fecha del movimiento.
+
+    SONDEA hasta ~30s: la tabla filtrada de Edited Checks puede pintar TARDE tras
+    aplicar el filtro de agencia, así que un solo pase leía filas viejas/vacías y
+    daba 'no aparece' aunque el cheque sí esté. Si no lo encuentra, loguea los
+    folios que SÍ vio (diagnóstico) para distinguir 'carga tardía' de 'match malo'."""
+    import time as _t
+    t0 = _t.time()
+    ultimo_visto = []
+    ciclo = 0
+    while (_t.time() - t0) < 90:
+        fila, folios = await _escanear_filas(
+            page, amount=amount, agency_code=agency_code,
+            folio=folio, movement_date=movement_date)
+        if fila is not None:
+            return fila
+        if folios:
+            ultimo_visto = folios
+        # El cheque recién procesado puede tardar en sincronizarse a Edited Checks,
+        # y la tabla NO se recarga sola: cada ~10s se RE-APLICA el filtro de agencia
+        # (equivale a refrescar) para traer las filas nuevas.
+        ciclo += 1
+        if agency_code and ciclo % 4 == 0:
+            try:
+                await buscar_agencia(page, agency_code)
+            except Exception:
+                pass
+        try:
+            await page.wait_for_load_state("networkidle", timeout=3_000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(2_000)
+    if folio:
+        logger.warning("[Chronos] Folio %s no apareció tras 30s. Folios vistos "
+                       "(%d): %s", folio, len(ultimo_visto),
+                       ", ".join(ultimo_visto[:15]) or "(tabla vacía)")
+    return None
 
 
 async def abrir_fila(page, fila) -> None:

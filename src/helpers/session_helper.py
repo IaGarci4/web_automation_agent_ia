@@ -23,6 +23,12 @@ from config.logger import get_logger
 logger = get_logger("session")
 
 
+class HandoffEscritorioError(RuntimeError):
+    """El login web quedó atrapado en el 'handoff' al Hermes2Agent de escritorio
+    (equipo con el HA instalado). El paralelo web debe correr en un servidor sin
+    el HA, o usar el modo agente (HERMES_AGENT_CDP=1)."""
+
+
 # ── Vinculación sesión ↔ usuario ─────────────────────────────────────────────
 # La sesión persistente (cookies + localStorage) se guarda junto a un "sidecar"
 # que anota QUÉ usuario la generó. Así, si cambian las credenciales en el .env
@@ -129,10 +135,59 @@ class SessionHelper:
         except Exception:
             pass
 
+        # Quizá no era login sino el interstitial 'Abrir Maxisend' (sesión SSO
+        # válida pero Keycloak mostró la pantalla intermedia): intentarlo primero.
+        if await self.abrir_app_si_interstitial(timeout_ms=3_000):
+            await self._esperar_listo()
+            try:
+                if settings.READY_SELECTOR and await self.page.locator(
+                        settings.READY_SELECTOR).first.is_visible():
+                    logger.info("✓ App cargada tras 'Abrir Maxisend' — login omitido.")
+                    await self._guardar_sesion()
+                    return True
+            except Exception:
+                pass
+
         logger.info("Sesión no activa — ejecutando login...")
         await self._login()
+        # Tras enviar credenciales, Keycloak puede mostrar 'Abrir Maxisend'.
+        await self.abrir_app_si_interstitial()
         await self._esperar_listo()
         await self._guardar_sesion()
+        return True
+
+    async def login_y_guardar_sesion(self, espera_post_ms: int = 8_000) -> bool:
+        """WARM-UP para el paralelo web (equivalente al `-m cookies` del repo viejo).
+
+        Navega, hace el login interactivo (usuario/contraseña) y GUARDA la sesión
+        (cookies + localStorage), TOLERANDO el interstitial de handoff al escritorio
+        — NO pulsa 'Abrir Maxisend'. Con la sesión SSO de Keycloak ya guardada, los
+        workers del paralelo entran luego a /transfers en SILENCIO (sin volver a
+        pasar por el login ni por el interstitial). Devuelve True si guardó sesión."""
+        await self.page.goto(settings.APP_URL, wait_until="domcontentloaded",
+                             timeout=settings.TIMEOUT_NAVIGATION)
+        await self.page.wait_for_timeout(1_500)
+
+        # Si ya hay sesión válida (app cargada), solo guardar.
+        if await self._sesion_activa():
+            await self._guardar_sesion()
+            logger.info("[Warm-up] Sesión ya activa — guardada para %s.", self.user)
+            return True
+
+        # Esperar el formulario de login y autenticar.
+        login_loc = self._loc(settings.LOGIN_USER_TESTID, settings.LOGIN_USER_SELECTOR).first
+        try:
+            await login_loc.wait_for(state="visible", timeout=settings.TIMEOUT_ELEMENT)
+        except Exception:
+            logger.info("[Warm-up] Formulario de login no visible — intento igual.")
+        await self._login()   # descarta modal 'Instalación Requerida' + llena + envía
+
+        # Dar tiempo a que Keycloak complete la autenticación (aunque quede en el
+        # interstitial). NO se pulsa 'Abrir Maxisend'. Luego se guarda la sesión.
+        await self.page.wait_for_timeout(espera_post_ms)
+        await self._guardar_sesion()
+        logger.info("[Warm-up] Sesión guardada para %s (tras login; se toleró el "
+                    "interstitial si apareció).", self.user)
         return True
 
     # ── Detección de sesión ───────────────────────────────────────────────────
@@ -206,18 +261,49 @@ class SessionHelper:
         Con fill() + click inmediato, el form quedaba inválido, el botón seguía
         disabled y el click esperaba 30s hasta hacer timeout.
         """
-        await locator.scroll_into_view_if_needed()
-        await locator.click()
+        # El modal 'Instalación Requerida' aparece con RETRASO y su backdrop
+        # intercepta el puntero. Se elimina por JS JUSTO antes de escribir y, si el
+        # clic falla igual (apareció en medio), se elimina y se reintenta.
+        ultimo = None
+        for intento in range(3):
+            await self._quitar_modal_js()
+            try:
+                await locator.scroll_into_view_if_needed(timeout=8_000)
+                await locator.click(timeout=8_000)
+                try:
+                    await locator.fill("")  # limpia cualquier valor previo
+                except Exception:
+                    pass
+                await locator.press_sequentially(valor, delay=30)
+                try:
+                    await locator.blur()
+                except Exception:
+                    await self.page.keyboard.press("Tab")
+                return
+            except Exception as e:
+                ultimo = e
+                await self._quitar_modal_js()
+                await self.page.wait_for_timeout(700)
+        if ultimo:
+            raise ultimo
+
+    async def _quitar_modal_js(self) -> int:
+        """Elimina por JS el modal 'Instalación Requerida' y su backdrop (si están).
+        Idempotente y sin ruido si no hay modal. Devuelve cuántos nodos quitó."""
         try:
-            await locator.fill("")  # limpia cualquier valor previo
+            return await self.page.evaluate("""
+                () => {
+                  let n = 0;
+                  for (const d of document.querySelectorAll(
+                        "div[id*='modal-installation-required'], .modal-backdrop")) {
+                    d.remove(); n++;
+                  }
+                  document.body.classList.remove('modal-open');
+                  document.body.style.overflow = '';
+                  return n;
+                }""")
         except Exception:
-            pass
-        await locator.press_sequentially(valor, delay=30)
-        try:
-            await locator.blur()
-        except Exception:
-            # Fallback si el navegador no soporta blur sobre el locator
-            await self.page.keyboard.press("Tab")
+            return 0
 
     async def cerrar_modal_instalacion(self, timeout_ms: int = 6_000) -> bool:
         """Descarta el modal «Instalación Requerida» del Hardware Agent.
@@ -231,40 +317,158 @@ class SessionHelper:
         de los casos no necesitan el agente. Los que sí (KRA-1527) fallarán más
         adelante en su propia comprobación, que es donde corresponde."""
         page = self.page
+        # El modal se detecta por su TEXTO (independiente del idioma y del id
+        # concreto): en la pantalla de LOGIN su id difiere del de dentro de la
+        # app, por eso antes fallaba la detección por id y el login se atoraba.
+        _RE_INSTALL = re.compile(
+            r"instalaci[oó]n requerida|installation required|"
+            r"componente de software|software component", re.I)
         candidatos = (
             page.get_by_role("button", name=_RE_CONTINUAR),
             page.locator("div[id*='modal-installation-required'] button"),
             page.locator("div.modal.show button").filter(has_text=_RE_CONTINUAR),
+            page.locator("div[role='dialog'] button, .modal.show button, "
+                         ".p-dialog button").filter(has_text=_RE_CONTINUAR),
             page.locator("div[id*='modal-installation-required'] .close, "
                          "div[id*='modal-installation-required'] button.close"),
         )
         espera = 0
         while espera <= timeout_ms:
+            # ¿Está el modal en pantalla? Se busca por id O por texto.
             try:
-                dialogo = page.locator(
-                    "div[id*='modal-installation-required']").first
-                if not await dialogo.is_visible():
-                    return False
+                por_id = page.locator("div[id*='modal-installation-required']").first
+                visible = await por_id.count() and await por_id.is_visible()
             except Exception:
-                return False
+                visible = False
+            if not visible:
+                try:
+                    txt = page.get_by_text(_RE_INSTALL).first
+                    visible = await txt.count() and await txt.is_visible()
+                except Exception:
+                    visible = False
+            if not visible:
+                # El modal aparece con RETRASO tras cargar el login: NO rendirse en
+                # la 1ª vuelta; seguir sondeando hasta el timeout por si aparece.
+                await page.wait_for_timeout(200)
+                espera += 200
+                continue
             for loc in candidatos:
                 try:
                     btn = loc.first
                     if not await btn.is_visible():
                         continue
                     await btn.click(force=True, timeout=4_000)
-                    await page.wait_for_timeout(700)
-                    logger.info("[Login] Modal 'Instalación Requerida' "
-                                "descartado (el Hardware Agent no está "
-                                "corriendo o no fue detectado).")
-                    return True
+                    await page.wait_for_timeout(600)
+                    # ¿Se cerró de verdad? (el clic a veces no basta)
+                    try:
+                        aun = page.locator("div[id*='modal-installation-required']").first
+                        if not (await aun.count() and await aun.is_visible()):
+                            logger.info("[Login] Modal 'Instalación Requerida' "
+                                        "descartado con 'Continuar'.")
+                            return True
+                    except Exception:
+                        return True
                 except Exception:
                     continue
             await page.wait_for_timeout(200)
             espera += 200
+
+        # Último recurso: el modal (y su backdrop) siguen bloqueando el formulario
+        # → se ELIMINAN por JS. El Hardware Agent no hace falta para el login web;
+        # los casos que sí lo requieren (impresión) fallan luego en su validación.
+        try:
+            quitados = await page.evaluate("""
+                () => {
+                  let n = 0;
+                  for (const d of document.querySelectorAll(
+                        "div[id*='modal-installation-required'], .modal-backdrop")) {
+                    d.remove(); n++;
+                  }
+                  document.body.classList.remove('modal-open');
+                  document.body.style.overflow = '';
+                  return n;
+                }""")
+            if quitados:
+                logger.info("[Login] Modal 'Instalación Requerida' eliminado por JS "
+                            "(%d nodo/s) — el HA no es necesario para el login web.",
+                            quitados)
+                return True
+        except Exception as e:
+            logger.warning("[Login] No se pudo eliminar el modal por JS: %s", str(e)[:80])
         logger.warning("[Login] El modal 'Instalación Requerida' sigue en "
                        "pantalla; sus overlays van a bloquear el formulario.")
         return False
+
+    async def abrir_app_si_interstitial(self, timeout_ms: int = 8_000) -> bool:
+        """Maneja la pantalla intermedia post-login 'Continúe en la aplicación de
+        Maxi'. Está pensado para el SERVIDOR SIN Hardware Agent (paralelo web):
+        ahí no está registrado el protocolo `hermes2agent://`, así que pulsar
+        'Abrir Maxisend' continúa a /transfers en el navegador (no hay diálogo
+        nativo). Con timeouts CORTOS para NO colgarse.
+
+        Devuelve True si logró entrar a la app; False si no había interstitial.
+        Si el interstitial existe pero no se puede continuar por web (equipo CON
+        el Hermes2Agent → handoff al escritorio), lanza HandoffEscritorioError para
+        que la fixture lo reporte con una guía clara en vez de colgarse."""
+        page = self.page
+        _RE_INTER = re.compile(
+            r"contin[uú]e en la aplicaci|continue in the maxi|"
+            r"ser redirigido a la aplicaci", re.I)
+
+        async def _ya_en_app() -> bool:
+            try:
+                if settings.READY_SELECTOR:
+                    r = page.locator(settings.READY_SELECTOR).first
+                    return bool(await r.count()) and await r.is_visible()
+            except Exception:
+                pass
+            return False
+
+        async def _en_interstitial() -> bool:
+            try:
+                loc = page.get_by_text(_RE_INTER).first
+                return bool(await loc.count()) and await loc.is_visible()
+            except Exception:
+                return False
+
+        if await _ya_en_app():
+            return False
+        if not await _en_interstitial():
+            return False
+
+        logger.info("[Login] Interstitial 'Continúe en la aplicación de Maxi' "
+                    "detectado — intento continuar a la app por web.")
+
+        # SERVIDOR SIN HA: pulsar 'Abrir Maxisend' navega a /transfers en el
+        # navegador (no hay protocolo registrado → sin diálogo nativo).
+        try:
+            btn = page.get_by_role("button", name=re.compile(r"abrir\s*maxi|open\s*maxi", re.I)).first
+            if await btn.count() and await btn.is_visible():
+                await btn.click(timeout=4_000)
+                await page.wait_for_timeout(1_500)
+                if await _ya_en_app():
+                    logger.info("[Login] Entré a la app tras 'Abrir Maxisend'.")
+                    return True
+        except Exception:
+            pass
+
+        # Fallback: re-navegar a la app UNA vez (bounded).
+        try:
+            await page.goto(settings.APP_URL, wait_until="domcontentloaded",
+                            timeout=settings.TIMEOUT_NAVIGATION)
+            await page.wait_for_timeout(1_500)
+            if await _ya_en_app():
+                logger.info("[Login] Entré a la app por re-navegación.")
+                return True
+        except Exception:
+            pass
+
+        # No se pudo continuar por web: es el handoff al escritorio (equipo con HA).
+        raise HandoffEscritorioError(
+            "Login web bloqueado por el handoff al Hermes2Agent (la pantalla "
+            "'Continúe en la aplicación de Maxi' solo ofrece abrir la app de "
+            "escritorio). Corre el paralelo web en un servidor SIN el Hardware "
+            "Agent instalado, o usa el modo agente con HERMES_AGENT_CDP=1.")
 
     async def _login(self) -> None:
         if not self.user or not self.password:
@@ -275,9 +479,11 @@ class SessionHelper:
         enviar  = self._loc(settings.LOGIN_SUBMIT_TESTID, settings.LOGIN_SUBMIT_SELECTOR).first
 
         await usuario.wait_for(state="visible", timeout=settings.TIMEOUT_ELEMENT)
-        # ANTES de teclear: si el modal del Hardware Agent está encima, el clic
-        # en el campo no llega y el login se cae con un timeout engañoso.
-        await self.cerrar_modal_instalacion()
+        # ANTES de teclear: el modal 'Instalación Requerida' del Hardware Agent
+        # tapa el formulario. NO se pulsa 'Continuar' (eso AVANZA la página y quita
+        # el campo de usuario); solo se ELIMINA por JS el modal + backdrop, dejando
+        # el formulario intacto. `_escribir` además lo re-quita en cada intento.
+        await self._quitar_modal_js()
         await self._escribir(usuario, self.user)
         await self._escribir(clave, self.password)
 
@@ -378,6 +584,19 @@ async def seleccionar_agencia(page, agency: str, timeout: int = 30_000) -> bool:
     Luego filtra por el código y clickea la fila. Confirma el PC si aparece.
     """
     import time as _t
+    import os as _os
+
+    # ── REGLA DE ORO (PRODUCCIÓN) ────────────────────────────────────────────
+    # En PROD la agencia multiagente SIEMPRE debe ser 0020-TX (ninguna otra). Si
+    # el caller pide otra —por una config vieja, un override, o un error— se
+    # FUERZA a 0020-TX y se registra el intento. Blindaje central: cualquier
+    # flujo multiagente que pase por aquí queda protegido, sin tocar cada test.
+    if getattr(settings, "_ES_PROD", False):
+        _prod_ag = _os.getenv("PROD_AGENCY_CODE", "0020-TX")
+        if str(agency or "").strip().upper() != _prod_ag.strip().upper():
+            logger.warning("[Multi] REGLA DE ORO (producción): agencia '%s' NO "
+                           "permitida — se FUERZA '%s'.", agency, _prod_ag)
+        agency = _prod_ag
 
     # Selectores ESPECÍFICOS del buscador de agencia (evitar fallback amplio que
     # podría matchear otro input y hacer que se teclee ahí el nombre del cliente).

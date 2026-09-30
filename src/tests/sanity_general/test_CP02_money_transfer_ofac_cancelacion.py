@@ -27,6 +27,7 @@ from src.helpers.datos import Datos
 from src.pagadores import flujo_mt as F
 from src.sanity_general import cancelacion as C
 from src.sanity_general import Evidencia
+from src.helpers.token_support import obtener_token
 
 logger = get_logger("CP02")
 
@@ -34,6 +35,10 @@ logger = get_logger("CP02")
 PAYER_CODE = os.getenv("CP02_PAYER", "WALMART")   # cash, MEXICO
 TIPO_ENVIO = "cash"
 MONTO      = int(os.getenv("CP02_AMOUNT", "310"))
+# Teléfono del CLIENTE en PRODUCCIÓN: número FIJO ASIGNADO (bloque ficticio NANP
+# 555-01NN) para que el SMS del recibo llegue a un buzón controlado. En TEST se
+# ignora y se usa el aleatorio de siempre. Override puntual: CP02_PROD_PHONE.
+PROD_PHONE = os.getenv("CP02_PROD_PHONE", "5550100019")
 
 # Beneficiario OFAC (nombre sancionado → dispara OFAC Hold)
 BENEF_NAME  = "JOAQUIN"
@@ -49,6 +54,11 @@ IA_DOB     = "05/21/1983"
 
 COMPLETAR = os.getenv("COMPLETAR_ENVIO", "1").strip().lower() in ("1", "true", "si", "yes")
 CANCELAR  = os.getenv("CP02_CANCELAR", "1").strip().lower() in ("1", "true", "si", "yes")
+# Soporte Remoto: consulta el token en BD y lo aplica para HABILITAR LA PANTALLA
+# del agente antes de operar. Best-effort (si no hay token/BD, se omite y sigue).
+# Desactivar con CP02_APLICAR_TOKEN=0.
+APLICAR_TOKEN = os.getenv("CP02_APLICAR_TOKEN", "1").strip().lower() in (
+    "1", "true", "si", "sí", "yes")
 EVIDENCE  = "CP02_money_transfer_ofac_cancelacion"
 
 
@@ -80,9 +90,27 @@ async def test_CP02_money_transfer_ofac_cancelacion(logged_page: Page, language,
     logger.info("[CP02] payer=%s | destino=%s/%s | monto=%s | beneficiario OFAC=%s %s %s",
                 cfg["code"], ciudad, estado, MONTO, BENEF_NAME, BENEF_LAST1, BENEF_LAST2)
 
+    # ── Step 0: Soporte Remoto — consulta el token en BD y lo aplica para
+    #    HABILITAR LA PANTALLA del agente. Best-effort: si no hay token/BD o el
+    #    control no está, se omite y el flujo continúa.
+    # Soporte Remoto SOLO cuando el flag central lo indique (kerberos/agente): en
+    # web no aporta y ni siquiera vale la pena consultar el token en BD.
+    from config import settings as _settings
+    if APLICAR_TOKEN and getattr(_settings, "SOPORTE_REMOTO", False):
+        try:
+            tok = obtener_token()
+            if tok:
+                await flow.aplicar_soporte_remoto(tok)
+                logger.info("[CP02] Soporte Remoto aplicado (pantalla habilitada).")
+            else:
+                logger.info("[CP02] Sin token de BD — se omite Soporte Remoto.")
+        except Exception as e:
+            logger.warning("[CP02] Soporte Remoto (token) no aplicado: %s", str(e)[:120])
+
     # ── Step 1–2: Formulario principal (beneficiario OFAC) + pagador ─────────
     await F.llenar_formulario_completo(
-        flow, datos, cfg, pais, ciudad, estado, monto=MONTO, tipo=TIPO_ENVIO)
+        flow, datos, cfg, pais, ciudad, estado, monto=MONTO, tipo=TIPO_ENVIO,
+        customer_phone=PROD_PHONE)
     await evi.shot("cliente_beneficiario", locators=[
         logged_page.get_by_test_id("transfer-beneficiary-name-0-dropdown-input"),
         logged_page.get_by_test_id("transfer-beneficiary-first-lastname-0-input"),

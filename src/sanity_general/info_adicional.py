@@ -26,6 +26,7 @@ import re
 import unicodedata
 
 from config.logger import get_logger
+from src.helpers.datos import es_produccion
 
 logger = get_logger("sanity.info_adicional")
 
@@ -163,6 +164,50 @@ async def _ficha_visible(flow) -> bool:
         return False
 
 
+# ── Pestaña 'Additional Info' de la pantalla de compliance (SOLO PRODUCCIÓN) ──
+# En PRODUCCIÓN, tras Continue, la pantalla de compliance trae varias PESTAÑAS
+# ('Important Messages' | 'Additional Info' | 'Third party transaction') y abre
+# en 'Important Messages'. La FICHA llenable vive bajo la pestaña 'Additional
+# Info' (button role=tab, class compliance-btn-tab; cuando faltan datos trae la
+# clase compliance-form-error + un ícono de alerta). Hay que CLICAR esa pestaña
+# para revelar la ficha. En TEST la ficha aparece directa, así que esto NO aplica.
+RE_TAB_ADD_INFO = re.compile(r"additional info", re.I)
+
+
+def _tab_ficha_loc(flow):
+    """Localizador de la PESTAÑA 'Additional Info' (no el botón del sub-formulario
+    ni el 'Add Additional Info' del modal): role=tab + class compliance-btn-tab."""
+    return flow.page.locator(
+        "button.compliance-btn-tab[role='tab']:has-text('Additional Info'), "
+        "#ngb-nav-1, "
+        "button[role='tab'].compliance-btn-tab:has-text('Additional Info')").first
+
+
+async def _existe_tab_ficha(flow) -> bool:
+    """True si la pestaña 'Additional Info' está VISIBLE (pantalla de compliance
+    con pestañas, típica de PRODUCCIÓN)."""
+    try:
+        tab = _tab_ficha_loc(flow)
+        return bool(await tab.count()) and await tab.is_visible()
+    except Exception:
+        return False
+
+
+async def _click_tab_ficha(flow) -> bool:
+    """Clica la pestaña 'Additional Info' para revelar la ficha llenable.
+    Devuelve True si la clicó."""
+    try:
+        tab = _tab_ficha_loc(flow)
+        if await tab.count() == 0 or not await tab.is_visible():
+            return False
+        await tab.click(timeout=4_000)
+        logger.info("Pestaña 'Additional Info' de compliance clicada — revelando ficha.")
+        await flow.page.wait_for_timeout(600)
+        return True
+    except Exception:
+        return False
+
+
 async def abrir_info_adicional(flow, tipo: str = "cash", timeout: int = None) -> bool:
     """Abre la ficha de Información Adicional. Idempotente y PACIENTE (SIN re-Continue).
 
@@ -179,11 +224,74 @@ async def abrir_info_adicional(flow, tipo: str = "cash", timeout: int = None) ->
 
     paso = 2_000
     transcurrido = 0
+    # Salida temprana: en PRODUCCIÓN (cliente ya registrado, sin KYC Hold) tras
+    # Continue NO aparece la ficha de compliance, sino DIRECTO el modal de
+    # confirmación 'Transaction Information Confirmation' (YES, Send). Si ese
+    # resumen ya está en pantalla, no hay ficha que llenar: se retorna de
+    # inmediato para no esperar 120s en vano. En TEST la ficha aparece primero,
+    # así que esto no se dispara antes de tiempo.
+    async def _resumen_visible() -> bool:
+        try:
+            b = flow.page.get_by_test_id(
+                "transfers-container-modal-summary-0-send-button").first
+            if await b.count() and await b.is_visible():
+                return True
+        except Exception:
+            pass
+        try:
+            import re as _re
+            t = flow.page.get_by_text(
+                _re.compile(r"transaction information confirmation|"
+                            r"informaci[oó]n de la transacci|yes,\s*send", _re.I)).first
+            return bool(await t.count()) and await t.is_visible()
+        except Exception:
+            return False
+
+    async def _mensaje_compliance() -> bool:
+        # En PROD, un beneficiario nuevo/OFAC dispara el bloqueo 'Additional
+        # beneficiary information is required… contact Compliance'. No es una
+        # ficha que se llene aquí: se retorna para que lo maneje el envío
+        # (Back to Transfer + reintento). Evita esperar 120s en vano.
+        try:
+            import re as _re
+            t = flow.page.get_by_text(_re.compile(
+                r"additional beneficiary information is required|contact the compliance|"
+                r"informaci[oó]n adicional del beneficiario|contacte a cumplimiento",
+                _re.I)).first
+            return bool(await t.count()) and await t.is_visible()
+        except Exception:
+            return False
+
+    _es_prod = es_produccion()
     while transcurrido < timeout:
         if await _ficha_visible(flow):
             logger.info("Ficha de Info Adicional visible.")
             return True
+        if await _resumen_visible():
+            logger.info("No se pidió Info Adicional (resumen/confirmación ya visible) "
+                        "— se continúa directo al envío.")
+            return False
+        # PRODUCCIÓN: la pantalla de compliance trae PESTAÑAS y abre en 'Important
+        # Messages'. Si existe la pestaña 'Additional Info', se CLICA para revelar
+        # la ficha llenable (regla: "darle clic a Additional Info y llenar el
+        # formulario"). Va ANTES del early-return por mensaje, para no confundir un
+        # formulario llenable con un bloqueo real.
+        if _es_prod and await _click_tab_ficha(flow):
+            if await esperar_ficha(flow, timeout=15_000):
+                logger.info("Ficha cargada tras clicar la pestaña 'Additional Info'.")
+                return True
+        if await _mensaje_compliance():
+            # Solo es BLOQUEO REAL si NO hay pestaña 'Additional Info' que abrir.
+            if not (_es_prod and await _existe_tab_ficha(flow)):
+                logger.info("Mensaje de compliance/OFAC visible (sin ficha ni pestaña "
+                            "'Additional Info') — bloqueo real; lo maneja el envío "
+                            "(Back to Transfer + reintento).")
+                return False
         if await _click_boton_add_info_visible(flow):
+            # Tras el modal intermedio, en PROD puede aparecer la pantalla de
+            # pestañas: clicar 'Additional Info' para revelar la ficha.
+            if _es_prod:
+                await _click_tab_ficha(flow)
             if await esperar_ficha(flow, timeout=15_000):
                 logger.info("Ficha cargada tras 'Add Additional Info'.")
                 return True
@@ -312,6 +420,48 @@ async def _fill_campo(flow, testid: str, valor: str, label: str) -> bool:
         return False
 
 
+# Nationality (Customer Information) — REQUERIDO en PRODUCCIÓN. Suele venir
+# autocompletado, pero el 'Clear All' lo borra; hay que RE-seleccionarlo o el
+# botón Accept queda deshabilitado. En TEST el campo no existe → se omite.
+#
+# ⚠ El valor es un GENTILICIO (AMERICAN, AUSTRALIAN, SALVADORAN…), NO un país.
+# Lógica PROBADA del repo maduro (HERMES2-qa mt_additional_info_mixin):
+#   locator del input por su LABEL 'Nationality' → click → click en
+#   button.dropdown-item:has-text('{gentilicio}').
+NATIONALITY_SELECT_XPATH = (
+    "xpath=//selectfield[.//label[normalize-space()='Nationality']]"
+    "//input[@data-testid='select-field-dropdown-input']")
+NATIONALITY_DEFAULT = os.getenv("IA_NATIONALITY", "AMERICAN")
+
+
+async def seleccionar_nationality_si_existe(flow, nationality: str = None) -> bool:
+    """Selecciona 'Nationality' con la lógica del repo maduro (probada).
+
+    `nationality` es un GENTILICIO. Por defecto 'AMERICAN' (siempre presente en
+    la lista). Best-effort: True si el campo NO existe (TEST) o si se seleccionó;
+    False SOLO si existe y no se pudo seleccionar."""
+    nationality = nationality or NATIONALITY_DEFAULT
+    try:
+        sel = flow.page.locator(NATIONALITY_SELECT_XPATH).first
+        if await sel.count() == 0 or not await sel.is_visible():
+            return True   # no aplica (TEST u otra variante sin Nationality)
+    except Exception:
+        return True
+    try:
+        await sel.click(timeout=5_000)
+        await flow.page.wait_for_timeout(1_200)   # como el repo maduro
+        opt = flow.page.locator(
+            f"button.dropdown-item:has-text('{nationality}')").first
+        await opt.click(timeout=5_000)
+        logger.info("Nationality → '%s' (lógica repo maduro).", nationality)
+        await flow.page.wait_for_timeout(400)
+        return True
+    except Exception as e:
+        logger.warning("Nationality: campo presente pero no se pudo seleccionar "
+                       "'%s': %s", nationality, str(e)[:80])
+        return False
+
+
 async def llenar_info_adicional_simple(flow, pais: str, tipo_id: str, num_id: str,
                                        exp: str, dob: str, tipo: str = "cash") -> bool:
     """Llena la ficha simple de Info Adicional (Identificación del Cliente) y
@@ -332,8 +482,13 @@ async def llenar_info_adicional_simple(flow, pais: str, tipo_id: str, num_id: st
     ok_num  = await _fill_campo(flow, INPUT_NUM_ID, num_id, "Número de ID")
     ok_exp  = await _fill_campo(flow, INPUT_EXP, exp, "Fecha de expiración")
     ok_dob  = await _fill_campo(flow, INPUT_DOB, dob, "Fecha de Nacimiento")
+    # Nationality: REQUERIDO en producción (habilita el botón Accept). Gentilicio
+    # por defecto (AMERICAN). Best-effort: True cuando el campo NO existe (TEST) o
+    # cuando se selecciona bien (prod), False solo si está presente y falla → por
+    # eso entra en `todo` sin romper TEST.
+    ok_nat  = await seleccionar_nationality_si_existe(flow)
 
-    todo = ok_pais and ok_tipo and ok_num and ok_exp and ok_dob
+    todo = ok_pais and ok_tipo and ok_num and ok_exp and ok_dob and ok_nat
     logger.info("Info Adicional llenada (pais=%s tipo=%s num=%s exp=%s dob=%s) → ok=%s",
                 ok_pais, ok_tipo, ok_num, ok_exp, ok_dob, todo)
     return todo
@@ -380,11 +535,48 @@ async def llenar_si_requerida(flow, pais: str, tipo_id: str, num_id: str,
 
 
 async def aceptar(flow, timeout: int = 12_000) -> bool:
-    """Pulsa Aceptar en la ficha y espera a que la ficha se cierre."""
+    """Pulsa Aceptar en la ficha y espera a que la ficha se cierre.
+
+    Antes de clicar, ESPERA a que el botón esté HABILITADO: si algún campo
+    requerido (p.ej. 'Nationality' en producción) sigue vacío, Accept queda
+    disabled. Se sondea hasta ~8s y, si sigue deshabilitado, se avisa QUÉ campos
+    faltan (los 'is required' en rojo) en vez de fallar con un timeout opaco."""
     clicked = False
     try:
-        btn = flow.page.locator(SEL_ACEPTAR).first
+        # Locator ESPECÍFICO del repo maduro: el Accept del footer de compliance
+        # (evita agarrar un botón oculto de otra pestaña/sección).
+        btn = flow.page.locator(
+            "xpath=//compliancefooter//footer//button[contains(@class,'footer-btn-accept') "
+            "and normalize-space()='Accept']").first
+        if await btn.count() == 0:
+            btn = flow.page.locator(SEL_ACEPTAR).first
         await btn.wait_for(state="visible", timeout=timeout)
+        # Esperar a que se habilite (form completo).
+        habilitado = False
+        import time as _t
+        t0 = _t.time()
+        while (_t.time() - t0) < 8:
+            try:
+                if await btn.is_enabled():
+                    habilitado = True
+                    break
+            except Exception:
+                pass
+            await flow.page.wait_for_timeout(300)
+        if not habilitado:
+            # Diagnóstico: listar los avisos 'is required' visibles.
+            try:
+                reqs = flow.page.get_by_text(re.compile(r"is required|requerid", re.I))
+                faltan = []
+                for i in range(min(await reqs.count(), 6)):
+                    r = reqs.nth(i)
+                    if await r.is_visible():
+                        faltan.append(" ".join((await r.inner_text() or "").split())[:40])
+                if faltan:
+                    logger.warning("Aceptar sigue DESHABILITADO — campos requeridos "
+                                   "sin llenar: %s", ", ".join(faltan))
+            except Exception:
+                pass
         await btn.click()
         clicked = True
     except Exception:

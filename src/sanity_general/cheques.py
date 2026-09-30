@@ -87,6 +87,31 @@ async def _visible(page, testid: str, timeout: int = 30_000):
     return loc
 
 
+async def _click_js_testid(page, testid: str) -> bool:
+    """Click por JS sobre el PRIMER elemento VISIBLE con ese data-testid (bypass
+    de visibilidad/overlay que impide el click de Playwright)."""
+    try:
+        return await page.evaluate(
+            """(tid) => {
+                const els = document.querySelectorAll(`[data-testid='${tid}']`);
+                for (const b of els) {
+                    const r = b.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) { b.click(); return true; }
+                }
+                return false;
+            }""", testid)
+    except Exception:
+        return False
+
+
+async def _visible_ahora(page, testid: str) -> bool:
+    try:
+        return await page.get_by_test_id(testid).locator(
+            "visible=true").first.is_visible()
+    except Exception:
+        return False
+
+
 async def _fill_mascara(page, loc, valor: str, label: str) -> None:
     """Llenado compatible con la máscara de Angular: click + limpiar + teclear."""
     await loc.click(force=True)
@@ -439,14 +464,49 @@ async def llenar_datos(flow, numero: str, amount: str = "5.00") -> dict:
 async def procesar(flow) -> None:
     """Click en 'Procesar' (Validate Check)."""
     page = flow.page
-    btn = await _visible(page, VALIDATE_BUTTON)
+    # La tabla 'Global search results' (cliente existente) NO siempre aparece,
+    # pero cuando sale tapa el botón 'Validate Check'. Se cierra best-effort con
+    # el mismo helper del resto (botón testid 'customer-search-table-close-table',
+    # que contiene 'close-table'); si no está, no hace nada.
     try:
-        await btn.wait_for(state="visible", timeout=30_000)
+        await flow.click_close_table()
     except Exception:
         pass
-    await btn.click(force=True)
-    await page.wait_for_timeout(4_000)
-    logger.info("[Cheques] Cheque PROCESADO (Validate).")
+    btn = await _visible(page, VALIDATE_BUTTON)
+    # Clic ROBUSTO + VERIFICADO: clic normal (respeta 'habilitado') → force → JS,
+    # y se CONFIRMA que procesó (aparece el modal Finish o desaparece Validate).
+    # Antes se hacía solo `click(force=True)` y se logueaba éxito sin verificar: si
+    # el force no disparaba el handler, 'finalizar' esperaba 60s en vano.
+    for intento in range(1, 4):
+        try:
+            await btn.scroll_into_view_if_needed(timeout=2_000)
+        except Exception:
+            pass
+        try:
+            await btn.click(timeout=5_000)
+        except Exception:
+            try:
+                await btn.click(force=True, timeout=5_000)
+            except Exception:
+                await _click_js_testid(page, VALIDATE_BUTTON)
+        # Verificar: modal de éxito (Finish) visible → procesado.
+        try:
+            await page.get_by_test_id(FINISH_BUTTON).locator(
+                "visible=true").first.wait_for(state="visible", timeout=6_000)
+            logger.info("[Cheques] Cheque PROCESADO (Validate) — intento %d.", intento)
+            return
+        except Exception:
+            pass
+        # O bien el botón Validate ya no está → también cuenta como procesado.
+        if not await _visible_ahora(page, VALIDATE_BUTTON):
+            logger.info("[Cheques] Validate desapareció — procesado (intento %d).",
+                        intento)
+            return
+        # Respaldo JS por si el clic no prendió, y reintento.
+        await _click_js_testid(page, VALIDATE_BUTTON)
+        await page.wait_for_timeout(1_500)
+    logger.warning("[Cheques] No se confirmó el Validate tras 3 intentos "
+                   "(el modal Finish no apareció).")
 
 
 async def finalizar(flow) -> None:

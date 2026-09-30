@@ -209,15 +209,48 @@ async def elegir_cuenta(flow, alias: str, timeout_ms: int = 30_000) -> bool:
 async def pagar(flow, monto: str = "1", evi=None) -> bool:
     """Escribe el monto y completa el pago (Pay Now → Yes → Accept)."""
     page = flow.page
-    # Monto
+    # Monto — campo con MÁSCARA de moneda (arranca en $0.00). Hay que LIMPIARLO
+    # de verdad y luego teclear; si no, el valor no entra, queda 'Required field'
+    # y 'Pay Now' no avanza (el 'Yes, Pay' se colgaba 60s). Se teclea con
+    # decimales ('1.00') y se VERIFICA que el campo quedó ≠ 0, con reintento.
     try:
         amount = page.locator(AMOUNT_SEL).first
         await amount.wait_for(state="visible", timeout=TIMEOUT)
-        await amount.click()
-        await page.keyboard.press("Control+A")
-        await page.keyboard.press("Backspace")
-        await amount.type(str(monto), delay=90)
-        logger.info("[Pagos] Monto a pagar: %s", monto)
+        objetivo = f"{float(str(monto).replace(',', '.')):.2f}"   # '1' → '1.00'
+        escrito = False
+        for intento in range(1, 4):
+            # Limpieza robusta: enfocar, seleccionar todo y borrar por varias vías.
+            await amount.click()
+            try:
+                await amount.press("Control+A")
+                await amount.press("Delete")
+            except Exception:
+                pass
+            try:
+                await amount.fill("")          # limpia la máscara
+            except Exception:
+                pass
+            await amount.press_sequentially(objetivo, delay=90)
+            try:
+                await amount.blur()
+            except Exception:
+                await page.keyboard.press("Tab")
+            await page.wait_for_timeout(400)
+            # Verificar que el campo tiene un valor distinto de cero.
+            try:
+                val = (await amount.input_value() or "")
+            except Exception:
+                val = ""
+            digitos = "".join(c for c in val if c.isdigit())
+            if digitos and digitos != "0" * len(digitos):
+                escrito = True
+                logger.info("[Pagos] Monto a pagar: %s (campo='%s')", objetivo, val)
+                break
+            logger.info("[Pagos] Monto quedó vacío/0 (intento %d, campo='%s') — reintento.",
+                        intento, val)
+        if not escrito:
+            logger.warning("[Pagos] No se pudo fijar el monto (sigue en 0).")
+            return False
     except Exception as e:
         logger.warning("[Pagos] No se pudo escribir el monto: %s", str(e)[:90])
         return False
@@ -241,7 +274,7 @@ async def pagar(flow, monto: str = "1", evi=None) -> bool:
                         (RE_ACCEPT, "'Accept' confirmado")):
         try:
             modal_btn = page.locator(CONFIRM_SEL).filter(has_text=regex).first
-            await modal_btn.wait_for(state="visible", timeout=60_000)
+            await modal_btn.wait_for(state="visible", timeout=25_000)
             if evi:
                 await evi.shot("confirmacion_pago" if regex is RE_PAY else "pago_aceptado")
             await _click_js(page, CONFIRM_SEL, desc)

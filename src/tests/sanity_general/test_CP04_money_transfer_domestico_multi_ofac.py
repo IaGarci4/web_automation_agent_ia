@@ -91,7 +91,8 @@ async def test_CP04_money_transfer_domestico_multi_OFAC(logged_page_multi: Page,
     # ── Steps 1–3: Formulario principal doméstico (ATM) ──────────────────────
     await F.llenar_formulario_completo(
         flow, datos, cfg, BENEF_COUNTRY, benef_city, benef_state,
-        monto=MONTO, tipo=TIPO_ENVIO, benef_phone=benef_phone)
+        monto=MONTO, tipo=TIPO_ENVIO, benef_phone=benef_phone,
+        customer_phone=CUST_PHONE)
 
     # Nombre del cliente USADO (cacheado por datos DESPUÉS de llenar) — para cancelar.
     cliente = datos.nombre_cliente()

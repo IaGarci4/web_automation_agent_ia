@@ -129,6 +129,17 @@ class Datos:
             self.over = {}
         self._cliente = str(self.over.get("cliente", "")).split()
         self._benef = str(self.over.get("beneficiario", "")).split()
+        # ── PRODUCCIÓN: datos ESTÁTICOS (no random) ─────────────────────────
+        # En producción no se ingresan datos sensibles nuevos: se usa un cliente
+        # (y beneficiario) YA REGISTRADO, definido por env. El segundo apellido
+        # debe ser "TEST" para que Compliance/Operaciones lo identifique.
+        # Ej.:  PROD_CLIENTE="SUSANA HERNANDEZ TEST"
+        #       PROD_BENEFICIARIO="JOSE ZARATE TEST"
+        if es_produccion():
+            if not self._cliente:
+                self._cliente = (os.getenv("PROD_CLIENTE", "") or "").split()
+            if not self._benef:
+                self._benef = (os.getenv("PROD_BENEFICIARIO", "") or "").split()
         self._cache = {}   # consistencia: misma semántica → mismo valor en la corrida
         self._dom = None   # domicilio REAL elegido una vez: dirección y zip coherentes
 
@@ -183,6 +194,13 @@ class Datos:
             return self._benef[1]
         if semantica == "beneficiary_last2" and len(self._benef) > 2:
             return " ".join(self._benef[2:])
+        # ── Segundo apellido = marcador "TEST" (convención del repo viejo) ──
+        # Si el usuario NO fijó un cliente/beneficiario con 3+ palabras (cubierto
+        # arriba), el segundo apellido es SIEMPRE "TEST" (mayúsculas, distinto de
+        # "Test"): así Compliance/Operaciones identifica y depura las
+        # transacciones de automatización. Configurable con SEGUNDO_APELLIDO_MARCA.
+        if semantica in ("customer_last2", "beneficiary_last2"):
+            return os.getenv("SEGUNDO_APELLIDO_MARCA", "TEST")
         # Monto (override 'monto') — SIEMPRE entero, sin centavos (125, 248, …)
         if semantica == "amount":
             if self.over.get("monto"):
@@ -213,6 +231,29 @@ class Datos:
         if es_produccion():
             return telefono_ficticio(pais)
         return self.fake.numerify("##########")
+
+    def telefono_cliente(self, prod_fijo: str = None) -> str:
+        """Teléfono del CLIENTE, con regla ESTRICTA por ambiente.
+
+        En PRODUCCIÓN cada caso usa un número FIJO YA ASIGNADO (bloque ficticio
+        NANP 555-01NN): no es un número válido de nadie, pero está reservado por
+        el equipo para ESE caso, de modo que el SMS del recibo que Hermes envía
+        en producción llegue a un buzón controlado y se pueda verificar. Por eso
+        NO se aleatoriza en prod: si cambiara en cada corrida no habría a dónde
+        recibir el SMS. Prioridad en prod:
+            1. `prod_fijo` — el número que declara el propio test (recomendado).
+            2. env `PROD_CLIENTE_PHONE` — override puntual sin tocar el test.
+            3. `telefono_ficticio("us")` — último recurso (555-01NN aleatorio).
+
+        En TEST se conserva EXACTAMENTE el comportamiento previo (mismo valor
+        aleatorio cacheado que `valor("phone")`), para no alterar el ambiente de
+        pruebas ni romper la búsqueda posterior del cliente por su teléfono.
+        """
+        if es_produccion():
+            fijo = (str(prod_fijo).strip() if prod_fijo else "") \
+                or (os.getenv("PROD_CLIENTE_PHONE", "") or "").strip()
+            return fijo or telefono_ficticio("us")
+        return self.valor("phone", "phone")
 
     def telefono_prefijo(self, prefijo: str = "573", largo: int = 10) -> str:
         """

@@ -25,6 +25,9 @@ Q_ID_TYPE     = "compliance-id-info-form-id-type-customer-id-dropdown-input"
 Q_ID_NUM      = "compliance-id-info-form-id-number-customer-id-input"
 Q_EXP         = "compliance-id-info-form-expiration-date-customer-id-input"
 Q_DOB         = "request-id-birth-date-input"
+# Nationality — campo de "Customer Information" que en PRODUCCIÓN es REQUERIDO
+# (nuevo; sin él el botón Accept queda deshabilitado). Mismo patrón que occupation.
+Q_NATIONALITY = "compliance-customer-info-form-nationality-dropdown-input"
 Q_OCCUPATION  = "compliance-customer-info-form-occupation-dropdown-input"
 Q_SUB_OCC     = "compliance-customer-info-form-sub-occupation-dropdown-input"
 Q_TAX_YES     = "compliance-tax-id-yes-radio"
@@ -229,7 +232,7 @@ async def llenar_cuestionario_completo(
     date_of_birth: str, occupation: str, subcategory_occupation: str,
     tax_id_type: str, tax_id_number: str, beneficiary_relation: str,
     purpose: str, origin_founds: str, tipo: str = "deposit",
-    limpiar: bool = True) -> bool:
+    limpiar: bool = True, nationality: str = None) -> bool:
     """Llena el cuestionario COMPLETO de compliance (terceros) y pulsa Accept.
 
     Reusa info_adicional para abrir el modal y para los campos de identificación
@@ -252,6 +255,14 @@ async def llenar_cuestionario_completo(
     resultados["id_number"] = await IA._fill_campo(flow, Q_ID_NUM, id_number, "Número de ID")
     resultados["expiration"] = await IA._fill_campo(flow, Q_EXP, expiration_date, "Fecha de expiración")
     resultados["dob"] = await IA._fill_campo(flow, Q_DOB, date_of_birth, "Fecha de Nacimiento")
+
+    # ── Nationality (Customer Information) ───────────────────────────────────
+    # En PRODUCCIÓN suele venir AUTOCOMPLETADA, pero el 'Clear All' la BORRA y sin
+    # ella el botón Accept queda deshabilitado ('Nationality is required'). Se
+    # RE-SELECCIONA con la lógica PROBADA del repo maduro (gentilicio, no país).
+    # Best-effort: en TEST el campo no existe → se omite sin romper.
+    resultados["nationality"] = await IA.seleccionar_nationality_si_existe(
+        flow, nationality)
 
     # ── Ocupación / subcategoría ─────────────────────────────────────────────
     resultados["occupation"] = await _dropdown_por_texto(

@@ -26,8 +26,10 @@ COMO CORRER:
 import pytest
 from playwright.async_api import Page
 
+from config import settings
 from config.logger import get_logger
 from src.helpers.screenshot_helper import ScreenshotHelper
+from src.helpers import status_change as SC
 from src.pages.hm_transferelektra_page import HmTransferelektraPage
 from src.sanity_general import Evidencia
 from src.sanity_general import cp14 as CP14
@@ -56,12 +58,37 @@ async def test_CP14_cancelacion_desde_chronos(logged_page: Page, language, width
     await evi.shot("envio_completado", paso=1)
     logger.info("[CP14] Step 1 OK — transferencia enviada.")
 
-    # ── Step 1b: leer el FOLIO en Reportes de Hermes (clave de búsqueda) ──────
+    # ── Step 1b: leer el AgentCode del header (agencia activa) ────────────────
+    agentcode = await CP14.leer_agentcode(logged_page)
+    if not agentcode:
+        agentcode = CP14.AGENCIA   # respaldo al configurado
+    logger.info("[CP14] AgentCode activo: %s", agentcode)
+
+    # ── Step 1c: leer el FOLIO en Reportes de Hermes (clave de búsqueda) ──────
     folio_hermes = await CP14.obtener_folio_en_hermes(flow, nombre_cliente=cliente_full)
     await evi.shot("folio_en_reportes", paso=1)
     assert folio_hermes, ("No se pudo leer el folio de la transferencia en "
                           "Reportes de Hermes — sin folio no se puede buscar en Chronos.")
     logger.info("[CP14] Folio de la transferencia: %s", folio_hermes)
+
+    # ── Step 1d: (SOLO TEST) forzar 'Payment Ready' en BD ─────────────────────
+    # En TEST el servicio de avance de estatus de los pagadores de Asia está
+    # apagado; se le da la vuelta con el SP de soporte. En PROD NO se hace (el
+    # servicio real avanza el estatus y Chronos llega a 'Payment Ready' solo).
+    if not settings._ES_PROD:
+        try:
+            claim, ok = SC.preparar_payment_ready(agentcode, folio_hermes)
+            if ok:
+                logger.info("[CP14] (TEST) Transferencia puesta en Payment Ready "
+                            "vía BD (claimcode=%s).", claim)
+            else:
+                logger.warning("[CP14] (TEST) No se pudo poner Payment Ready en BD "
+                               "(agentcode=%s, folio=%s) — Chronos quizá no la muestre "
+                               "lista; se intentará igual.", agentcode, folio_hermes)
+        except Exception as e:
+            logger.warning("[CP14] (TEST) Cambio de estatus en BD falló: %s", str(e)[:120])
+    else:
+        logger.info("[CP14] (PROD) El servicio real avanza el estatus — sin cambio en BD.")
 
     try:
         # ── Step 2: abrir Chronos en pestaña nueva y validar Sender ───────────
@@ -69,7 +96,7 @@ async def test_CP14_cancelacion_desde_chronos(logged_page: Page, language, width
         chrono_evi = Evidencia(ScreenshotHelper(chronos_page), EVIDENCE)
         await chrono_evi.shot("chronos_cargado", paso=2)
 
-        hallada = await CP14.buscar_transfer(chronos_page, folio_hermes)
+        hallada = await CP14.buscar_transfer(chronos_page, folio_hermes, agencia=agentcode)
         if hallada:
             await CP14.validar_sender(chronos_page, CP14.CLIENTE_NOMBRE)
             await chrono_evi.shot("sender_validado", paso=3)
@@ -83,7 +110,7 @@ async def test_CP14_cancelacion_desde_chronos(logged_page: Page, language, width
 
         # ── Step 4: Status Change → esperar Payment Ready → cancelar ──────────
         folio, alcanzado, ultimo = await CP14.status_change_hasta_payment_ready(
-            chronos_page, folio_hermes)
+            chronos_page, folio_hermes, agencia=agentcode)
 
         if alcanzado:
             try:

@@ -681,13 +681,24 @@ class BasePage(ABC):
         pulsar Buscar). Sin esa espera, el recorrido de selectores se agotaba
         con `count()==0` antes de que las filas existieran."""
         self.logger.info("[%s] Abriendo menú de la transacción...", desc)
-        try:
-            await self.page.locator(self._KEBAB_ESPERA).first.wait_for(
-                state="visible", timeout=12_000)
-            await self.page.wait_for_timeout(500)
-        except Exception:
+        # La fila del reporte aparece con retraso (indexación + VPN). Se SONDEA
+        # hasta ~25s (antes 12s) a que rendericen las filas/kebab; si no, el
+        # recorrido de selectores se agotaba con count()==0 y no abría el menú.
+        _fila = None
+        _esp = 0
+        while _esp < 25_000:
+            try:
+                _fila = self.page.locator(self._KEBAB_ESPERA).first
+                if await _fila.count() and await _fila.is_visible():
+                    break
+            except Exception:
+                pass
+            await self.page.wait_for_timeout(1_000)
+            _esp += 1_000
+        else:
             self.logger.warning("[%s] No aparecieron filas de resultado tras "
-                                "Buscar.", desc)
+                                "Buscar (~25s).", desc)
+        await self.page.wait_for_timeout(300)
         candidatos = list(self._KEBAB_CANDIDATOS)
         candidatos.insert(3, f".p-scroller-content .ng-star-inserted:"
                              f"nth-of-type({row_index + 1}) .td-options .icon")
@@ -1222,20 +1233,70 @@ class BasePage(ABC):
         """
         try:
             cerrar = self.page.locator(
+                # Botones EXACTOS de 'Close Table' según el módulo: Transfers y
+                # Checks (Cheques) usan testids distintos. Van primero.
+                "[data-testid='transfers-customer-close-table-0'], "
+                "[data-testid='customer-search-table-close-table'], "
                 "a:has-text('Close Table'), button:has-text('Close Table'), "
                 "span:has-text('Close Table'), a:has-text('Cerrar tabla'), "
+                "div.close-btn:has-text('Cerrar'), div.close-txt:has-text('Cerrar'), "
                 "[data-testid*='close-table']"
             )
             # count() es INSTANTÁNEO — sin espera de 800ms por cada campo.
-            if await cerrar.count() == 0:
-                return
-            primero = cerrar.first
-            if await primero.is_visible():
-                await primero.click(timeout=2000)
-                await self.page.wait_for_timeout(200)
-                self.logger.info("[Autofill] Overlay 'Close Table' cerrado.")
+            if await cerrar.count() > 0:
+                primero = cerrar.first
+                if await primero.is_visible():
+                    await primero.click(timeout=2000)
+                    await self.page.wait_for_timeout(200)
+                    self.logger.info("[Autofill] Overlay 'Close Table' cerrado.")
+                    return
         except Exception:
             pass  # no estaba el overlay — seguir normal
+        # NOTA: el botón "Cerrar" del modal de CLIENTE EXISTENTE (tabla
+        # 'Resultados de búsqueda Global') es justamente el testid
+        # `transfers-customer-close-table-0`, ya cubierto por el bloque de arriba.
+        # A propósito NO se hace un Escape/cierre genérico de diálogos aquí: eso
+        # podría cerrar OTROS modales legítimos (Branch Search, pagador, etc.) si
+        # esta función se invoca con uno abierto. El cierre queda ACOTADO a la
+        # tabla de autocompletado, que es lo único que debe cerrar este helper.
+
+    async def cerrar_tabla_global_search(self, espera_ms: int = 3_000) -> bool:
+        """Cierra la tabla 'Global search results' que el endpoint
+        `/api/bff/customer/search` HABILITA (con latencia) al teclear un cliente
+        YA REGISTRADO.
+
+        A diferencia de `_cerrar_autofill` (chequeo INSTANTÁNEO, pensado para
+        cuando la tabla ya está en el DOM), este método SONDEA hasta `espera_ms`
+        a que el botón 'Close Table' aparezca: la tabla llega DESPUÉS de que el
+        endpoint responde, así que un chequeo instantáneo se la perdía y la tabla
+        terminaba tapando el siguiente campo (la dirección). En producción, con el
+        número fijo de un cliente existente, la tabla aparece SIEMPRE.
+
+        `espera_ms=0` ⇒ un único chequeo instantáneo (equivale a _cerrar_autofill).
+        Devuelve True si cerró la tabla."""
+        sel = (
+            "[data-testid='transfers-customer-close-table-0'], "
+            "[data-testid='customer-search-table-close-table'], "
+            "[data-testid*='close-table'], "
+            "a:has-text('Close Table'), button:has-text('Close Table'), "
+            "span:has-text('Close Table'), a:has-text('Cerrar tabla')"
+        )
+        btn = self.page.locator(sel).first
+        t = 0
+        while True:
+            try:
+                if await btn.count() > 0 and await btn.is_visible():
+                    await btn.click(timeout=2_000)
+                    await self.page.wait_for_timeout(150)
+                    self.logger.info("[GlobalSearch] Tabla de resultados cerrada (%.1fs).",
+                                     t / 1000)
+                    return True
+            except Exception:
+                pass
+            if t >= espera_ms:
+                return False
+            await self.page.wait_for_timeout(150)
+            t += 150
 
     # ── Modales y tablas ──────────────────────────────────────────────────────
 
@@ -1278,10 +1339,15 @@ class BasePage(ABC):
 
     # ── Overlays y esperas ────────────────────────────────────────────────────
 
-    async def wait_for_no_blocking_overlays(self, timeout: int = 3_000) -> None:
+    async def wait_for_no_blocking_overlays(self, timeout: int = 1_500) -> None:
         """
         Espera hasta que no haya overlays que bloqueen eventos de puntero.
         Detecta: loaders, modales de notificación, dialog-mask, etc.
+
+        Timeout corto a propósito (1.5s): cuando NO hay overlay bloqueante la
+        condición se cumple al instante; el timeout solo se agota con overlays
+        'no bloqueantes' que igual dejamos pasar, así que esperar 3s ahí era
+        tiempo perdido (aparecía muchas veces por caso). Configurable por llamada.
         """
         overlay_selectors = [
             "#maxi-loader",
@@ -1409,15 +1475,15 @@ class BasePage(ABC):
 
     # ── Notifications modal (reutilizable en todos los Page Objects) ──────────
 
-    async def handle_notifications_modal(self, modal_timeout: int = 30_000) -> dict:
+    async def handle_notifications_modal(self, modal_timeout: int = None) -> dict:
         """
         Maneja el modal 'Notificaciones Importantes' — port fiel de
         HERMES2-qa → LoginPage.close_notifications_modal().
 
-        `modal_timeout`: cuánto esperar a que APAREZCA el modal. Es intrusivo
-        ("Tiene que abrir todas sus notificaciones para poder continuar") y su
-        aparición es impredecible (3s a 20s+); por eso esperamos generoso para
-        no seguir el flujo antes de tiempo y fallar.
+        `modal_timeout`: cuánto esperar a que APAREZCA el modal. En la práctica
+        aparece en ~1-2s cuando existe (y `wait_for` retorna apenas se ve), así
+        que NO hace falta esperar 30s: en ambientes sin notificaciones (prod) eso
+        eran 30s tirados por caso. Default 8s, configurable con NOTIF_MODAL_TIMEOUT.
 
         Flujo (igual que un agente humano, y que el repo maduro):
           1. Espera que termine la navegación SSO → HERMES2 sin tocar el DOM
@@ -1434,6 +1500,9 @@ class BasePage(ABC):
             dict: {found: bool, count: int}
         """
         result = {"found": False, "count": 0}
+        if modal_timeout is None:
+            import os as _os
+            modal_timeout = int(_os.getenv("NOTIF_MODAL_TIMEOUT", "8000"))
 
         try:
             # ── Paso 1: esperar fin de navegación SSO → HERMES2 ─────────────
@@ -1566,8 +1635,11 @@ class BasePage(ABC):
             # ── Paso 5: cerrar con la X (se habilita al leerlas todas) ──────
             closed = False
             try:
-                # Espera explícita: hasta que la X esté habilitada (max 15s)
-                await expect(close_btn).to_be_enabled(timeout=15_000)
+                # Espera hasta que la X esté habilitada. Antes 15s: cuando la X no
+                # se habilitaba, congelaba la pantalla 15s antes de caer al JS
+                # remove. La X se habilita en <1s al terminar de leer; 4s basta y
+                # si no, el JS remove (más abajo) cierra el modal al instante.
+                await expect(close_btn).to_be_enabled(timeout=4_000)
                 await close_btn.click(force=True)
                 # Espera explícita: hasta que el modal desaparezca (max 5s)
                 await close_btn.wait_for(state="hidden", timeout=5_000)

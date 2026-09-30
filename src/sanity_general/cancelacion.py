@@ -123,6 +123,11 @@ async def cancelar_por_cliente(flow, nombre_cliente: str, *,
                      a Reportes (la app la resetea tras cada transacción).
     Devuelve True si la cancelación se ejecutó sin excepción.
     """
+    # NOTA: la cancelación SIEMPRE se intenta de verdad. Antes se omitía cuando el
+    # envío quedaba en "bloqueo de compliance" marcándolo como OK — eso producía
+    # falsos passed. Ahora, si el envío NO se completó, completar_envio devuelve
+    # False y el test falla en `assert enviado` ANTES de llegar aquí; si llegamos
+    # aquí es porque SÍ hay una transacción creada que cancelar.
     logger.info("[Cancelación] Iniciando cancelación para cliente: %s", nombre_cliente)
     _primer = nombre_cliente.split()[0] if nombre_cliente else None
     _sel = "tbody tr, tr.report-transactions-result-row"

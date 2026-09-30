@@ -95,7 +95,8 @@ async def test_CP03_money_transfer_deposito_tdd(logged_page: Page, language, wid
     # ── Steps 1–2: Formulario principal (Depósito) ───────────────────────────
     await F.llenar_formulario_completo(
         flow, datos, cfg, "COLOMBIA", CIUDAD, ESTADO,
-        monto=MONTO, tipo=TIPO_ENVIO, benef_phone=benef_phone)
+        monto=MONTO, tipo=TIPO_ENVIO, benef_phone=benef_phone,
+        customer_phone=CUST_PHONE)
     await evi.shot("cliente_beneficiario", locators=[
         logged_page.get_by_test_id("transfer-beneficiary-name-0-dropdown-input"),
         logged_page.get_by_test_id("transfer-beneficiary-first-lastname-0-input"),
@@ -111,7 +112,15 @@ async def test_CP03_money_transfer_deposito_tdd(logged_page: Page, language, wid
     ])
     logger.info("[CP03] Steps 1–2 OK (depósito + pagador + cuenta).")
 
-    # ── Step 3: Cuestionario COMPLETO de compliance ──────────────────────────
+    # ── Step 3: Forma de pago Tarjeta de Débito — ANTES de Continuar ─────────
+    # IMPORTANTE: el PIN Debit Card se elige en el panel de Totales ANTES de
+    # pulsar 'Continuar'. Si se selecciona después (tras el cuestionario), el
+    # envío se procesa como EFECTIVO y el POS nunca aparece.
+    await F.seleccionar_pago_tarjeta_debito(flow, logger)
+    await evi.shot("tarjeta_debito", locators=[logged_page.get_by_test_id(F.TESTID_PAGO_DEBITO)])
+    logger.info("[CP03] Step 3 OK (Tarjeta de Débito seleccionada antes de Continuar).")
+
+    # ── Step 4: Cuestionario COMPLETO de compliance ──────────────────────────
     await flow.wait_for_no_blocking_overlays()
     try:
         await flow.click_continue()
@@ -127,12 +136,7 @@ async def test_CP03_money_transfer_deposito_tdd(logged_page: Page, language, wid
         purpose=Q_PURPOSE, origin_founds=Q_ORIGIN, tipo=TIPO_ENVIO)
     await evi.shot("cuestionario")
     assert ok_q, "El cuestionario completo de compliance no se llenó correctamente."
-    logger.info("[CP03] Step 3 OK (cuestionario completo).")
-
-    # ── Step 4: Forma de pago Tarjeta de Débito ──────────────────────────────
-    await F.seleccionar_pago_tarjeta_debito(flow, logger)
-    await evi.shot("tarjeta_debito", locators=[logged_page.get_by_test_id(F.TESTID_PAGO_DEBITO)])
-    logger.info("[CP03] Step 4 OK (Tarjeta de Débito seleccionada).")
+    logger.info("[CP03] Step 4 OK (cuestionario completo).")
 
     # ── Steps 5–7: Completar envío con POS (emulador de terminal) ────────────
     if COMPLETAR:

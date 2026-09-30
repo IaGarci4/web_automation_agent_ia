@@ -150,14 +150,52 @@ async def _llenar_direccion_cliente(flow, datos, max_intentos: int = 10) -> bool
     return False
 
 
-async def llenar_hasta_monto(flow, datos, cfg, pais, ciudad, estado) -> float:
+# Endpoint (BFF) del Global Search de clientes. Al teclear el teléfono/nombre de
+# un cliente YA REGISTRADO, Hermes llama a esta ruta y, cuando responde con
+# coincidencias, HABILITA la tabla 'Global search results'. Esa tabla llega con
+# latencia (depende de la red / VPN en prod), así que se ESCUCHA el endpoint
+# mientras se teclea y se cierra la tabla apenas responde — un chequeo instantáneo
+# se la perdía y terminaba tapando el campo de dirección.
+_GLOBALSEARCH_URL = "customer/search"
+
+
+async def _llenar_identidad_cliente(flow, datos, customer_phone=None) -> None:
+    """Teclea la identidad del cliente (celular + nombre + apellidos) y CIERRA la
+    tabla del Global Search si el endpoint la habilita.
+
+    Se escucha `/customer/search` durante el tecleo: si responde (cliente
+    existente → la tabla aparecerá enseguida) se sondea y se cierra la tabla; si
+    no responde en el margen (cliente nuevo → normalmente sin tabla), solo se hace
+    un chequeo instantáneo. Así el paso es rápido cuando no hay tabla y robusto
+    cuando sí la hay (caso típico de PRODUCCIÓN con el número fijo asignado)."""
+    from playwright.async_api import TimeoutError as _PWTimeout
+    respondio = False
+    try:
+        async with flow.page.expect_response(
+                lambda r: _GLOBALSEARCH_URL in r.url.lower(), timeout=5_000):
+            await flow.fill_transfer_customer_cellphone_0_cellphone_input(
+                datos.telefono_cliente(customer_phone))
+            await flow.fill_transfer_customer_name_0_input(datos.valor("customer_name", "first_name"))
+            await flow.fill_transfer_customer_first_lastname_0_input(datos.valor("customer_last1", "last_name"))
+            await flow.fill_transfer_customer_second_lastname_0_input(datos.valor("customer_last2", "last_name"))
+        respondio = True
+    except _PWTimeout:
+        # El search no respondió en el margen (cliente nuevo): probablemente sin tabla.
+        pass
+    except Exception:
+        pass
+    # Si el endpoint respondió, la tabla llega enseguida → sondeo hasta 2s (con
+    # coincidencias se cierra apenas aparece; el margen solo se agota cuando NO hay
+    # tabla, p.ej. cliente nuevo en test). Si no respondió, chequeo instantáneo.
+    await flow.cerrar_tabla_global_search(espera_ms=2_000 if respondio else 0)
+
+
+async def llenar_hasta_monto(flow, datos, cfg, pais, ciudad, estado, customer_phone=None) -> float:
     """Cliente + beneficiario (país del pagador; ciudad/estado aleatorios) + tarifa + monto."""
     await flow.navigate()
-    await flow.fill_transfer_customer_cellphone_0_cellphone_input(datos.valor("phone", "phone"))
-    await flow.fill_transfer_customer_name_0_input(datos.valor("customer_name", "first_name"))
-    await flow.fill_transfer_customer_first_lastname_0_input(datos.valor("customer_last1", "last_name"))
-    await flow.fill_transfer_customer_second_lastname_0_input(datos.valor("customer_last2", "last_name"))
-    await flow.click_close_table()
+    # CLIENTE — celular (prod: fijo asignado; test: aleatorio) + nombre/apellidos,
+    # cerrando la tabla del Global Search si el endpoint la habilita.
+    await _llenar_identidad_cliente(flow, datos, customer_phone)
     # Dirección: validador real de Hermes (dirección primero → elige → su zip).
     await _llenar_direccion_cliente(flow, datos)
     await flow.click_transfer_beneficiary_toggle_fi()
@@ -240,7 +278,7 @@ async def set_beneficiary_expandido(flow, expandir: bool) -> None:
         pass
 
 
-async def llenar_formulario_completo(flow, datos, cfg, pais, ciudad, estado, monto=None, tipo="cash", benef_phone=None, colapsar_beneficiario=True) -> float:
+async def llenar_formulario_completo(flow, datos, cfg, pais, ciudad, estado, monto=None, tipo="cash", benef_phone=None, colapsar_beneficiario=True, ciudad_cash_contiene: str = None, customer_phone=None) -> float:
     """Llena el formulario COMPLETO de un envío NORMAL, EMPEZANDO DESDE EL
     TELÉFONO del cliente (no desde el país). Orden: cliente (celular, nombre,
     dirección, CP) → beneficiario (país + detalle, expandido con verificación) →
@@ -251,15 +289,13 @@ async def llenar_formulario_completo(flow, datos, cfg, pais, ciudad, estado, mon
     Es el llenado robusto de ai_agent: usa set_beneficiary_expandido (no clics a
     ciegas) y cierra la tabla 'Global search results' que puede tapar campos."""
     await flow.navigate()
-    # 1) CLIENTE — desde el celular
-    await flow.fill_transfer_customer_cellphone_0_cellphone_input(datos.valor("phone", "phone"))
-    await flow.fill_transfer_customer_name_0_input(datos.valor("customer_name", "first_name"))
-    await flow.fill_transfer_customer_first_lastname_0_input(datos.valor("customer_last1", "last_name"))
-    await flow.fill_transfer_customer_second_lastname_0_input(datos.valor("customer_last2", "last_name"))
-    try:
-        await flow.click_close_table()
-    except Exception:
-        pass
+    # 1) CLIENTE — desde el celular.
+    # En PRODUCCIÓN se usa el número FIJO ASIGNADO del caso (customer_phone), para
+    # que el SMS del recibo llegue a un buzón controlado; en TEST sigue siendo el
+    # aleatorio de siempre (regla en datos.telefono_cliente). Al teclear la
+    # identidad, el endpoint /customer/search puede HABILITAR la tabla del Global
+    # Search (cliente existente): _llenar_identidad_cliente la escucha y la cierra.
+    await _llenar_identidad_cliente(flow, datos, customer_phone)
     # Dirección: validador real de Hermes (dirección primero → elige → su zip).
     await _llenar_direccion_cliente(flow, datos)
     # 2) BENEFICIARIO: país + detalle (expandido con verificación)
@@ -310,7 +346,16 @@ async def llenar_formulario_completo(flow, datos, cfg, pais, ciudad, estado, mon
     monto_str = str(int(monto)) if monto is not None else datos.monto()
     if tipo == "cash":
         # Sub-formulario CASH (mapeado y estable): ciudad pagador → fee type → monto
-        await flow.fill_transfer_payers_money_info_city_0_cash_dropdown_input(cfg.get("payer_city", "GUADALAJARa"))
+        # `ciudad_cash_contiene` (opcional, default None → comportamiento normal):
+        # cuando hay ciudades homónimas en distintos estados (ej. OCOTLAN en JALISCO
+        # y en OAXACA) el typeahead elige la 1ª (OAXACA). Con este parámetro se
+        # teclea solo el nombre y se CLICKEA la opción cuyo texto contenga el estado.
+        if ciudad_cash_contiene:
+            await flow.seleccionar_ciudad_cash_por_texto(
+                cfg.get("payer_city", "GUADALAJARa"), ciudad_cash_contiene)
+        else:
+            await flow.fill_transfer_payers_money_info_city_0_cash_dropdown_input(
+                cfg.get("payer_city", "GUADALAJARa"))
         await flow.click_mexico_regular()
         await flow.wait_for_no_blocking_overlays()
         await flow.click_transfer_payers_money_info_amo(monto_str)
@@ -389,10 +434,15 @@ async def llenar_formulario_completo(flow, datos, cfg, pais, ciudad, estado, mon
         return None
 
 
+# Label ROJO 'Branch is required' — réplica del repo maduro (HERMES2-qa
+# select_branch_if_required). La clase `text-danger` ES el indicador rojo de
+# campo obligatorio: si el label está VISIBLE, la sucursal es obligatoria; si
+# NO se muestra, no se requiere. Se cubren cash + depósito y ambos idiomas.
 SELECTOR_BRANCH_REQUIRED = (
-    "transfersmoneyinfocashform p.text-danger.error-input, "
-    "transfersmoneyinfocashform p[class*='error-input'], "
-    ".payer-branch-button ~ p.text-danger.error-input"
+    "transfersmoneyinfocashform p[class='text-danger error-input mb-0 mt-0'], "
+    "p.text-danger.error-input, "
+    ".payer-branch-button ~ p.text-danger.error-input, "
+    "p[class*='text-danger'][class*='error-input']"
 )
 
 
@@ -449,39 +499,38 @@ async def _commit_fila_sucursal(flow, fila, txt, logger=None) -> bool:
 
 
 async def _elegir_fila_sucursal(flow, logger=None) -> bool:
-    """Dentro del modal de sucursales, elige una fila AL AZAR por ÍNDICE."""
+    """Dentro del modal de sucursales, elige una fila AL AZAR (réplica del repo maduro).
+
+    El repo maduro (HERMES2-qa select_branch_if_required) espera `tr[tabindex="0"]`
+    con timeout de 5s, elige una fila al azar y da UN click. Aquí se mantiene esa
+    vía RÁPIDA (prioridad al selector canónico), con un único reintento de apertura
+    y fallbacks de fila para las variantes del modal ('Branch Search', PrimeNG)."""
     import random
     sel = (
         "tr[tabindex='0'], tr.p-selectable-row, [data-p-selectable-row='true'], "
-        ".p-datatable-tbody tr, #branchesModalId tbody tr, .modal.show tbody tr"
+        ".p-datatable-tbody tr, #branchesModalId tbody tr, .modal.show tbody tr, "
+        # Modal 'Branch Search' (variante WALMART, etc.): filas dentro del diálogo.
+        "div[role='dialog'] tbody tr, div[role='dialog'] table tr:has(td), "
+        ".modal.show table tr:has(td)"
     )
-    try:
-        await flow.page.locator(sel).first.wait_for(state="visible", timeout=9000)
-    except Exception:
-        pass
     filas = flow.page.locator(sel)
-    # Si el modal aún no pintó filas, REINTENTAR abriéndolo de nuevo: dejarlo sin
-    # sucursal cuando la app la exige deja el formulario INVÁLIDO y Continue no
-    # avanza (se veía como 'Sin mensaje ni resumen' en bucle).
+    # Espera CORTA (~6s, como los 5s del repo maduro) a que pinten las filas. Si
+    # no salió ninguna, UN solo reintento de apertura del modal (dejarlo sin
+    # sucursal cuando la app la exige deja el formulario inválido y Continue no
+    # avanza). Se evita el sondeo de 18s + doble reapertura que hacía lento el paso.
     try:
-        if await filas.count() == 0:
-            for _ in range(2):
-                try:
-                    await flow.click_branch()
-                except Exception:
-                    pass
-                try:
-                    await flow.page.locator(sel).first.wait_for(state="visible", timeout=6000)
-                except Exception:
-                    pass
-                if await filas.count() > 0:
-                    break
+        await filas.first.wait_for(state="visible", timeout=6_000)
     except Exception:
-        pass
+        if await filas.count() == 0:
+            try:
+                await flow.click_branch()
+                await filas.first.wait_for(state="visible", timeout=6_000)
+            except Exception:
+                pass
     visibles = []
     try:
         n = await filas.count()
-        for i in range(min(n, 60)):
+        for i in range(min(n, 40)):
             f = filas.nth(i)
             try:
                 if await f.is_visible() and (await f.inner_text()).strip():
@@ -506,26 +555,34 @@ async def _elegir_fila_sucursal(flow, logger=None) -> bool:
 
 
 async def seleccionar_sucursal_si_aplica(flow, logger=None) -> bool:
-    """Selecciona sucursal SOLO si la app la marca como requerida ('Field required')."""
+    """Selecciona sucursal SOLO si aparece el label ROJO 'Branch is required'.
+
+    Réplica de `select_branch_if_required` del repo maduro (HERMES2-qa): el label
+    con clase `text-danger error-input` es el indicador ROJO de campo obligatorio.
+    - Si ese label está VISIBLE → la sucursal es OBLIGATORIA → se elige al azar.
+    - Si NO se muestra → la sucursal NO es necesaria → se omite (sin abrir modal).
+
+    Esto reemplaza la detección lenta anterior: nada de abrir el modal "por si
+    acaso"; solo se abre cuando el label rojo confirma que es requerido."""
     try:
-        # Sondeo RÁPIDO de 'Field required': corta apenas aparece (caso que SÍ
-        # requiere sucursal, ej. Uniteller depósito) en vez de esperar 700 ms
-        # fijos. Si no aparece en ~600 ms, se asume que no se requiere.
+        label = flow.page.locator(SELECTOR_BRANCH_REQUIRED).first
+        # El label rojo aparece tras validar el pagador. Sondeo CORTO: apenas se
+        # ve, cortamos; si no sale en ~1.2 s, se asume que NO se requiere sucursal.
         requerida = False
-        for _ in range(4):
+        for _ in range(6):
             try:
-                if await flow.page.locator(SELECTOR_BRANCH_REQUIRED).first.is_visible():
+                if await label.is_visible():
                     requerida = True
                     break
             except Exception:
                 pass
-            await flow.page.wait_for_timeout(150)
+            await flow.page.wait_for_timeout(200)
         if not requerida:
             if logger:
-                logger.info("Sucursal NO requerida (sin 'Field required') — sigo al flujo normal.")
+                logger.info("Sucursal NO requerida (sin label rojo 'Branch is required') — se omite.")
             return False
         if logger:
-            logger.info("'Field required' de sucursal detectado → eligiendo una sucursal al azar.")
+            logger.info("Label rojo 'Branch is required' detectado → eligiendo sucursal al azar.")
         await flow.click_branch()
         return await _elegir_fila_sucursal(flow, logger)
     except Exception as e:
@@ -699,24 +756,78 @@ _IA_EXP     = os.getenv("IA_EXP",     "12/31/2032")
 _IA_DOB     = os.getenv("IA_DOB",     "05/21/1983")
 
 
+async def _debito_seleccionado(flow) -> bool:
+    """True si la 'Tarjeta débito' quedó realmente ACTIVA (no efectivo).
+
+    Se revisa por el estado del control (aria-checked/checked) o por la clase
+    'activa/selected' del contenedor del toggle Cash/PIN. Best-effort."""
+    try:
+        el = flow.page.get_by_test_id(TESTID_PAGO_DEBITO).first
+        if await el.count() == 0:
+            return False
+        aria = (await el.get_attribute("aria-checked")) or ""
+        if aria.lower() == "true":
+            return True
+        clase = (await el.get_attribute("class")) or ""
+        if re.search(r"active|selected|checked|activ", clase, re.I):
+            return True
+        try:
+            if await el.is_checked():
+                return True
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return False
+
+
 async def seleccionar_pago_tarjeta_debito(flow, logger=None) -> bool:
-    """Selecciona la forma de pago 'Tarjeta débito' en el panel de Totales."""
+    """Selecciona la forma de pago 'Tarjeta débito' en el panel de Totales y
+    VERIFICA que quedó activa (si no, reintenta). Sin esto, el envío se procesaba
+    como EFECTIVO y el modal del POS nunca aparecía."""
     try:
         btn = flow.page.get_by_test_id(TESTID_PAGO_DEBITO).first
         await btn.wait_for(state="visible", timeout=15_000)
-        await btn.click(force=True)
+        for intento in range(1, 4):
+            try:
+                await btn.scroll_into_view_if_needed(timeout=2_000)
+            except Exception:
+                pass
+            try:
+                await btn.click(force=True)
+            except Exception:
+                pass
+            await flow.page.wait_for_timeout(800)
+            if await _debito_seleccionado(flow):
+                if logger:
+                    logger.info("Forma de pago 'Tarjeta débito' seleccionada y verificada "
+                                "(intento %d).", intento)
+                return True
+            if logger:
+                logger.info("Tarjeta débito aún no activa (intento %d) — reintento.", intento)
+        # No se pudo verificar el estado: se deja el último click hecho, pero se
+        # avisa — el envío podría irse como EFECTIVO.
         if logger:
-            logger.info("Forma de pago 'Tarjeta débito' seleccionada.")
-        await flow.page.wait_for_timeout(1_000)
-        return True
+            logger.warning("No se pudo CONFIRMAR 'Tarjeta débito' activa — el envío "
+                           "podría procesarse como efectivo.")
+        return False
     except Exception as e:
         if logger:
             logger.warning("No se pudo seleccionar 'Tarjeta débito': %s", str(e)[:80])
         return False
 
 
+_RE_MSG_COMPLIANCE = re.compile(
+    r"additional beneficiary information is required|contact the compliance|"
+    r"informaci[oó]n adicional del beneficiario|contacte a cumplimiento", re.I)
+
+
 async def _mensaje_compliance_visible(flow) -> bool:
-    """True si está en pantalla el mensaje informativo de compliance/OFAC."""
+    """True si está en pantalla el mensaje informativo de compliance/OFAC.
+
+    Cubre varias variantes: el testid del mensaje, la presencia del botón
+    'Back to Transfer', y el TEXTO del aviso ('Additional beneficiary information
+    is required…', 'contact the Compliance department', etc.)."""
     try:
         if await flow.page.get_by_test_id(_OFAC_MSG_TESTID).first.is_visible():
             return True
@@ -727,23 +838,107 @@ async def _mensaje_compliance_visible(flow) -> bool:
             return True
     except Exception:
         pass
+    # Botón 'Back to Transfer' por texto (variante sin la clase footer-btn-back).
+    try:
+        b = flow.page.get_by_role("button", name=_RE_BACK).first
+        if await b.count() and await b.is_visible():
+            return True
+    except Exception:
+        pass
+    # Texto del aviso de compliance.
+    try:
+        t = flow.page.get_by_text(_RE_MSG_COMPLIANCE).first
+        if await t.count() and await t.is_visible():
+            return True
+    except Exception:
+        pass
     return False
 
 
 async def _click_back_to_transfer(flow, logger=None) -> bool:
-    """Pulsa 'Back to Transfer' / 'Regresar A Envío' desde la pantalla OFAC."""
-    for get in (lambda: flow.page.locator(_BACK_TO_TRANSFER_SEL).first,
-                lambda: flow.page.get_by_role("button", name=_RE_BACK).first):
-        try:
-            btn = get()
-            await btn.wait_for(state="visible", timeout=6_000)
-            await btn.click(timeout=5_000)
+    """Pulsa 'Back to Transfer' / 'Regresar A Envío' desde la pantalla de
+    compliance/OFAC ('Additional beneficiary information is required… contact
+    Compliance'). Robusto: prueba clase, rol, texto y el XPath del repo maduro,
+    espera PACIENTE a que el botón aparezca (la pantalla monta con latencia) y,
+    como último recurso, hace click por JS sobre el <button> cuyo texto casa —
+    así no se queda atorado sin pulsarlo."""
+    # 1) Localizadores Playwright (rápidos, respetan visibilidad/animaciones).
+    getters = (
+        lambda: flow.page.locator(_BACK_TO_TRANSFER_SEL).first,
+        lambda: flow.page.get_by_role("button", name=_RE_BACK).first,
+        lambda: flow.page.locator(
+            "button:has-text('Back to Transfer'), button:has-text('Back To Transfer'), "
+            "button:has-text('Regresar'), a:has-text('Back to Transfer')").first,
+        # XPath idéntico al repo maduro (HERMES2-qa), por texto exacto del botón.
+        lambda: flow.page.locator(
+            "xpath=//button[contains(normalize-space(.),'Back to Transfer')]"
+            "|//button[contains(normalize-space(.),'Regresar A Envío')]"
+            "|//button[contains(normalize-space(.),'Regresar a Envío')]").first,
+        lambda: flow.page.get_by_text(_RE_BACK).first,
+    )
+    # Espera PACIENTE (como el repo maduro, wait_for 15-30s): reintenta los
+    # localizadores en un bucle de ~12s en vez de rendirse a los 4s.
+    import time as _t
+    t0 = _t.time()
+    while (_t.time() - t0) < 12:
+        for get in getters:
+            try:
+                btn = get()
+                if await btn.count() == 0:
+                    continue
+                if not await btn.is_visible():
+                    continue
+                try:
+                    await btn.scroll_into_view_if_needed(timeout=2_000)
+                except Exception:
+                    pass
+                try:
+                    await btn.click(timeout=4_000)
+                except Exception:
+                    await btn.click(timeout=4_000, force=True)   # por si un overlay lo tapa
+                if logger:
+                    logger.info("Mensaje de compliance/OFAC → 'Back to Transfer' pulsado.")
+                await flow.page.wait_for_timeout(500)
+                return True
+            except Exception:
+                continue
+        await flow.page.wait_for_timeout(200)
+    # 2) Último recurso: click por JS sobre el botón cuyo texto casa (aunque
+    #    Playwright lo considere 'no visible' por alguna animación/overlay).
+    try:
+        pulsado = await flow.page.evaluate(
+            """() => {
+                const re = /back to transfer|regresar a env/i;
+                const els = Array.from(document.querySelectorAll('button, a'));
+                const b = els.find(e => re.test((e.textContent || '').trim()));
+                if (b) { b.click(); return true; }
+                return false;
+            }""")
+        if pulsado:
             if logger:
-                logger.info("Mensaje de compliance/OFAC → 'Back to Transfer' pulsado.")
-            await flow.page.wait_for_timeout(1_500)
+                logger.info("Mensaje de compliance/OFAC → 'Back to Transfer' pulsado (vía JS).")
+            await flow.page.wait_for_timeout(500)
             return True
-        except Exception:
-            continue
+    except Exception:
+        pass
+    if logger:
+        logger.warning("No se pudo pulsar 'Back to Transfer' (ninguna variante casó).")
+    return False
+
+
+async def _esperar_mensaje_oculto(flow, timeout_ms: int = 5_000) -> bool:
+    """Espera a que el mensaje de compliance/OFAC DESAPAREZCA de la pantalla.
+
+    Tras pulsar 'Back to Transfer' la app tarda un momento en volver al formulario.
+    Sin esta espera, la siguiente vuelta del bucle detectaba el mensaje 'stale'
+    (el botón 'Back to Transfer' todavía en el DOM) apenas milisegundos después de
+    re-Continue y creía que el envío no avanzaba. Devuelve True si se ocultó."""
+    import time as _t
+    t0 = _t.time()
+    while (_t.time() - t0) * 1000 < timeout_ms:
+        if not await _mensaje_compliance_visible(flow):
+            return True
+        await flow.page.wait_for_timeout(200)
     return False
 
 
@@ -859,56 +1054,79 @@ async def completar_envio(flow, completar=True, logger=None, evi=None,
         send_btn = flow.page.get_by_test_id(SEND_BUTTON_TESTID)
 
         async def _esperar_mensaje_o_resumen(timeout_ms: int) -> str:
-            """Tras dar Continue, espera (poll) a que aparezca ALGO: el mensaje
-            informativo de compliance/OFAC, la INFO ADICIONAL requerida, o el
-            resumen (botón 'Sí, Enviar'). El mensaje OFAC a veces TARDA (ej.
-            doméstico), por eso se sondea."""
-            paso = 1_000
-            t = 0
-            while t < timeout_ms:
-                if await _mensaje_compliance_visible(flow):
-                    return "mensaje"
+            """Tras dar Continue, espera (poll) a que aparezca ALGO: el resumen
+            (botón 'Sí, Enviar'), la FICHA DE INFO ADICIONAL llenable, o el
+            MENSAJE de compliance/OFAC sin formulario. Poll por RELOJ REAL.
+
+            ORDEN de prioridad (regla del negocio): 1º resumen (lo normal y más
+            barato); 2º ficha llenable (si HAY campos/fotos que llenar, se llenan);
+            3º mensaje sin formulario (si NO hay nada que llenar, solo el aviso
+            'Additional beneficiary information is required… contact Compliance' →
+            Back to Transfer). Se revisa la ficha ANTES que el mensaje porque la
+            pantalla de compliance puede tener ambas pestañas ('Additional Info' e
+            'Important Messages'): si hay ficha, tiene prioridad llenarla."""
+            import time as _t
+            t0 = _t.time()
+            while (_t.time() - t0) * 1000 < timeout_ms:
+                # 1) Resumen (barato: is_visible del botón) — el caso normal.
                 try:
                     if await send_btn.first.is_visible():
                         return "resumen"
                 except Exception:
                     pass
-                # REGLA DEL PROYECTO: si el flujo PIDE Información Adicional, se
-                # llena; si no la pide, se continúa. Sin esto, Continue no avanza
-                # (el form queda inválido) y el loop reintentaba en vano.
+                # 2) Ficha de Info Adicional LLENABLE (hay campos que llenar).
                 try:
-                    if await _IA._requiere_info(flow, timeout=800):
+                    if await _IA._requiere_info(flow, timeout=300):
                         return "info_adicional"
                 except Exception:
                     pass
-                await flow.page.wait_for_timeout(paso)
-                t += paso
+                # 3) Mensaje de compliance/OFAC SIN formulario (solo Back to Transfer).
+                if await _mensaje_compliance_visible(flow):
+                    return "mensaje"
+                await flow.page.wait_for_timeout(400)
             return ""
 
         resumen = False
-        for intento in range(1, 9):
+        info_adicional_hecha = False   # la Info Adicional se llena UNA sola vez
+        mensaje_visto = 0              # veces que salió el mensaje de compliance
+        flow._compliance_block = False  # (compatibilidad; ya NO se usa para pasar)
+        MAX_INTENTOS = 6                # igual que el repo maduro (complete_money_transfer)
+        for intento in range(1, MAX_INTENTOS + 1):
             await flow.wait_for_no_blocking_overlays()
             try:
                 await flow.click_continue()
             except Exception:
                 pass
 
-            estado = await _esperar_mensaje_o_resumen(12_000)
+            estado = await _esperar_mensaje_o_resumen(8_000)
             if estado == "resumen":
                 resumen = True
                 break
             if estado == "mensaje":
-                if evi is not None and intento == 1:
+                mensaje_visto += 1
+                if evi is not None and mensaje_visto == 1:
                     await evi.shot("mensaje_info_adicional")
                 if logger:
-                    logger.info("Mensaje de compliance/OFAC (intento %d) → Back to Transfer.",
-                                intento)
+                    logger.info("Mensaje de compliance/OFAC (intento %d/%d) → Back to "
+                                "Transfer y reintento Continue.", intento, MAX_INTENTOS)
                 await _click_back_to_transfer(flow, logger)
+                # Esperar a que el mensaje DESAPAREZCA antes de re-Continue: así la
+                # próxima vuelta no lo detecta 'stale' (el botón 'Back to Transfer'
+                # aún en el DOM) y evalúa la pantalla REAL tras el nuevo Continue.
+                await _esperar_mensaje_oculto(flow, timeout_ms=5_000)
                 continue
             if estado == "info_adicional":
-                # El flujo EXIGE Información Adicional → se llena y se acepta;
-                # luego se reintenta Continue. Si no se pudiera llenar, se sigue
-                # intentando en la próxima vuelta (no se aborta el envío).
+                # Se llena la Información Adicional UNA sola vez. Si tras haberla
+                # llenado el flujo vuelve a pedirla, NO se re-llena (eso dejaba el
+                # caso atorado en el bloqueo OFAC 'contact Compliance'): se trata
+                # como mensaje (Back to Transfer) y se reintenta Continue.
+                if info_adicional_hecha:
+                    if logger:
+                        logger.info("Información Adicional ya llenada antes "
+                                    "(intento %d) → Back to Transfer, sin re-llenar.",
+                                    intento)
+                    await _click_back_to_transfer(flow, logger)
+                    continue
                 if logger:
                     logger.info("Información Adicional REQUERIDA (intento %d) → llenando…",
                                 intento)
@@ -918,6 +1136,7 @@ async def completar_envio(flow, completar=True, logger=None, evi=None,
                     await _IA.llenar_si_requerida(
                         flow, pais=_IA_PAIS, tipo_id=_IA_TIPO_ID, num_id=_IA_NUM_ID,
                         exp=_IA_EXP, dob=_IA_DOB, tipo=tipo_envio, timeout=3_000)
+                    info_adicional_hecha = True
                 except Exception as e:
                     if logger:
                         logger.warning("Info Adicional: no se pudo llenar (%s).", str(e)[:90])
@@ -937,12 +1156,47 @@ async def completar_envio(flow, completar=True, logger=None, evi=None,
                 return False
 
         if not resumen:
+            # No se llegó al resumen ('Sí, Enviar') tras agotar los reintentos.
+            # Si fue por el mensaje de compliance/OFAC que PERSISTE ('Additional
+            # beneficiary information is required… contact Compliance'), el envío
+            # NO se completó: es un BLOQUEO REAL y se reporta como FALLO. NUNCA se
+            # marca el caso como passed sin haber enviado (y, por tanto, sin nada
+            # que cancelar). Se capta evidencia y se sale con 'Back to Transfer'.
+            if mensaje_visto or await _mensaje_compliance_visible(flow):
+                if evi is not None:
+                    await evi.shot("compliance_block_no_enviado")
+                await _click_back_to_transfer(flow, logger)
+                if logger:
+                    logger.error("❌ El mensaje de compliance/OFAC PERSISTIÓ tras %d "
+                                 "reintentos ('Additional beneficiary information is "
+                                 "required… contact Compliance'): el envío NO se "
+                                 "completó. Se reporta como FALLO (no hay transacción "
+                                 "que cancelar).", MAX_INTENTOS)
+                return False
             if logger:
                 logger.warning("No se abrió el resumen de envío (Continue no avanzó).")
             return False
 
         if evi is not None:
             await evi.shot("envio_continue")
+
+        # RE-AFIRMAR la Tarjeta de Débito antes de enviar: los clics de Continue
+        # pueden revertir el panel de Totales a EFECTIVO. Si el toggle sigue
+        # visible y no está activo, se re-selecciona. Así el envío va como TARJETA
+        # y el POS aparece (antes se iba como efectivo y el POS nunca salía).
+        if pos_pago:
+            try:
+                toggle = flow.page.get_by_test_id(TESTID_PAGO_DEBITO).first
+                # Solo re-afirmar si el toggle SIGUE visible (panel de Totales) y
+                # no está activo. En el resumen el toggle no existe → no se espera.
+                if await toggle.count() and await toggle.is_visible() \
+                        and not await _debito_seleccionado(flow):
+                    if logger:
+                        logger.info("Tarjeta débito no activa antes de enviar — re-afirmando.")
+                    await toggle.click(force=True)
+                    await flow.page.wait_for_timeout(600)
+            except Exception:
+                pass
 
         await flow.click_yes_send()
 
